@@ -8,15 +8,19 @@ module.exports = {
     expiresIn: process.env.JWT_EXPIRES_IN || '24h',
   },
   db: {
+    connectionString: process.env.DATABASE_URL || null,
     host: process.env.DB_HOST || 'localhost',
     port: parseInt(process.env.DB_PORT, 10) || 5432,
     database: process.env.DB_NAME || 'joineazy_db',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'postgres_secure_password_change_me',
+    ssl: process.env.DATABASE_URL || process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
   },
   cors: {
     origin: process.env.CORS_ORIGIN
-      ? (process.env.CORS_ORIGIN.includes(',') ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()) : process.env.CORS_ORIGIN)
+      ? (process.env.CORS_ORIGIN === '*'
+          ? true
+          : (process.env.CORS_ORIGIN.includes(',') ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()) : process.env.CORS_ORIGIN))
       : ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173'],
   }
 };
