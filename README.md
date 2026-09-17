@@ -6,7 +6,7 @@ A production-grade, role-based full-stack web application designed for academic 
 
 ## 📺 Project Demonstration
 
-- **GitHub Repository**: `[ADD GITHUB LINK]`
+- **GitHub Repository**: [https://github.com/MrGuptaRanjit/joineazy-task-1](https://github.com/MrGuptaRanjit/joineazy-task-1)
 - **Demo Walkthrough Video**: `[ADD VIDEO LINK]`
 - **Live Platform**: `[OPTIONAL / ADD DEPLOYMENT LINK]`
 
