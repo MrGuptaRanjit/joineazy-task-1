@@ -1,6 +1,6 @@
 const { verifyToken } = require('../utils/jwt.util');
 const { errorResponse } = require('../utils/response.util');
-const db = require('../db');
+const { User } = require('../models');
 
 const authenticate = async (req, res, next) => {
   try {
@@ -20,17 +20,14 @@ const authenticate = async (req, res, next) => {
       return errorResponse(res, 'Invalid authentication token.', 401);
     }
 
-    // Verify user exists in database
-    const userResult = await db.query(
-      'SELECT id, name, email, role, student_id FROM users WHERE id = $1',
-      [decoded.id]
-    );
+    // Verify user exists in MongoDB
+    const user = await User.findById(decoded.id).select('-password_hash');
 
-    if (userResult.rows.length === 0) {
+    if (!user) {
       return errorResponse(res, 'User associated with this token no longer exists.', 401);
     }
 
-    req.user = userResult.rows[0];
+    req.user = user.toJSON();
     next();
   } catch (error) {
     next(error);

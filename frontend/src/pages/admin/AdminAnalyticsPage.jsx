@@ -416,7 +416,7 @@ export default function AdminAnalyticsPage() {
 
           <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
             <span>Aggregated with zero mock data</span>
-            <span className="text-brand-400 font-mono">PostgreSQL Direct</span>
+            <span className="text-brand-400 font-mono">MongoDB Atlas</span>
           </div>
         </div>
       </div>

@@ -1,83 +1,83 @@
-const db = require('../db');
+const { Submission, Assignment, AssignmentTarget, Group, GroupMember, User } = require('../models');
 
 class SubmissionRepository {
   async confirmSubmission({ assignmentId, studentId, groupId }) {
-    const query = `
-      INSERT INTO submissions (assignment_id, student_id, group_id, status, confirmed_at)
-      VALUES ($1, $2, $3, 'CONFIRMED', CURRENT_TIMESTAMP)
-      ON CONFLICT (assignment_id, student_id)
-      DO UPDATE SET status = 'CONFIRMED', confirmed_at = CURRENT_TIMESTAMP, group_id = EXCLUDED.group_id
-      RETURNING *
-    `;
-    const result = await db.query(query, [assignmentId, studentId, groupId]);
-    return result.rows[0];
+    const submission = await Submission.findOneAndUpdate(
+      {
+        assignment_id: assignmentId,
+        student_id: studentId,
+      },
+      {
+        assignment_id: assignmentId,
+        student_id: studentId,
+        group_id: groupId || null,
+        status: 'CONFIRMED',
+        confirmed_at: new Date(),
+      },
+      {
+        new: true,
+        upsert: true,
+        runValidators: true,
+      }
+    );
+
+    return submission.toJSON();
   }
 
   async findByAssignmentAndStudent(assignmentId, studentId) {
-    const query = `
-      SELECT * FROM submissions
-      WHERE assignment_id = $1 AND student_id = $2
-    `;
-    const result = await db.query(query, [assignmentId, studentId]);
-    return result.rows[0] || null;
+    const submission = await Submission.findOne({
+      assignment_id: assignmentId,
+      student_id: studentId,
+    });
+    return submission ? submission.toJSON() : null;
   }
 
   async getSubmissionsByAssignment(assignmentId) {
-    const query = `
-      SELECT s.*, 
-             u.name AS student_name, 
-             u.email AS student_email, 
-             u.student_id AS roll_number,
-             g.name AS group_name
-      FROM submissions s
-      JOIN users u ON s.student_id = u.id
-      LEFT JOIN groups g ON s.group_id = g.id
-      WHERE s.assignment_id = $1
-      ORDER BY s.confirmed_at DESC
-    `;
-    const result = await db.query(query, [assignmentId]);
-    return result.rows;
+    const submissions = await Submission.find({ assignment_id: assignmentId })
+      .populate('student_id', 'name email student_id')
+      .populate('group_id', 'name')
+      .sort({ confirmed_at: -1 });
+
+    return submissions.map((s) => ({
+      id: s._id.toString(),
+      assignment_id: s.assignment_id.toString(),
+      student_id: s.student_id?._id ? s.student_id._id.toString() : s.student_id.toString(),
+      student_name: s.student_id?.name || 'Unknown',
+      student_email: s.student_id?.email || '',
+      roll_number: s.student_id?.student_id || '',
+      group_id: s.group_id?._id ? s.group_id._id.toString() : null,
+      group_name: s.group_id?.name || null,
+      status: s.status,
+      confirmed_at: s.confirmed_at,
+    }));
   }
 
   async getAssignmentAudit(assignmentId) {
-    const assignmentRes = await db.query('SELECT * FROM assignments WHERE id = $1', [assignmentId]);
-    if (!assignmentRes.rows[0]) return null;
-    const assignment = assignmentRes.rows[0];
+    const assignment = await Assignment.findById(assignmentId);
+    if (!assignment) return null;
 
-    // 1. Groups to audit
+    // 1. Eligible Groups
     let eligibleGroups = [];
     if (assignment.target_type === 'ALL') {
-      const groupsRes = await db.query('SELECT id, name FROM groups ORDER BY name ASC');
-      eligibleGroups = groupsRes.rows;
+      eligibleGroups = await Group.find().sort({ name: 1 });
     } else {
-      const groupsRes = await db.query(`
-        SELECT g.id, g.name
-        FROM assignment_targets at
-        JOIN groups g ON at.group_id = g.id
-        WHERE at.assignment_id = $1
-        ORDER BY g.name ASC
-      `, [assignmentId]);
-      eligibleGroups = groupsRes.rows;
+      const targets = await AssignmentTarget.find({ assignment_id: assignmentId }).populate('group_id');
+      eligibleGroups = targets.filter((t) => t.group_id != null).map((t) => t.group_id);
     }
 
-    // 2. Compute group breakdown
+    // 2. Group Summary Breakdown
     const groupSummary = [];
     for (const group of eligibleGroups) {
-      const membersRes = await db.query(
-        'SELECT COUNT(DISTINCT user_id)::int AS count FROM group_members WHERE group_id = $1',
-        [group.id]
-      );
-      const memberCount = membersRes.rows[0]?.count || 0;
-
-      const subRes = await db.query(
-        "SELECT COUNT(DISTINCT student_id)::int AS count FROM submissions WHERE group_id = $1 AND assignment_id = $2 AND status = 'CONFIRMED'",
-        [group.id, assignmentId]
-      );
-      const subCount = subRes.rows[0]?.count || 0;
+      const memberCount = await GroupMember.countDocuments({ group_id: group._id });
+      const subCount = await Submission.countDocuments({
+        group_id: group._id,
+        assignment_id: assignmentId,
+        status: 'CONFIRMED',
+      });
       const rate = memberCount > 0 ? Number(((subCount / memberCount) * 100).toFixed(2)) : 0;
 
       groupSummary.push({
-        group_id: group.id,
+        group_id: group._id.toString(),
         group_name: group.name,
         total_members: memberCount,
         confirmed_submissions: subCount,
@@ -85,40 +85,50 @@ class SubmissionRepository {
       });
     }
 
-    // 3. Student submissions list
-    let studentsRes;
+    // 3. Student Submissions List
+    let eligibleStudentIds = [];
     if (assignment.target_type === 'ALL') {
-      studentsRes = await db.query(`
-        SELECT u.id AS student_id, u.name AS student_name, u.email, u.student_id AS roll_number,
-               g.name AS group_name,
-               COALESCE(s.status, 'PENDING') AS status,
-               s.confirmed_at
-        FROM users u
-        LEFT JOIN group_members gm ON u.id = gm.user_id
-        LEFT JOIN groups g ON gm.group_id = g.id
-        LEFT JOIN submissions s ON s.assignment_id = $1 AND s.student_id = u.id
-        WHERE u.role = 'STUDENT'
-        ORDER BY s.confirmed_at DESC NULLS LAST, u.name ASC
-      `, [assignmentId]);
+      const allStudents = await User.find({ role: 'STUDENT' });
+      eligibleStudentIds = allStudents.map((s) => s._id);
     } else {
-      studentsRes = await db.query(`
-        SELECT u.id AS student_id, u.name AS student_name, u.email, u.student_id AS roll_number,
-               g.name AS group_name,
-               COALESCE(s.status, 'PENDING') AS status,
-               s.confirmed_at
-        FROM users u
-        JOIN group_members gm ON u.id = gm.user_id
-        JOIN groups g ON gm.group_id = g.id
-        JOIN assignment_targets at ON at.group_id = g.id AND at.assignment_id = $1
-        LEFT JOIN submissions s ON s.assignment_id = $1 AND s.student_id = u.id
-        WHERE u.role = 'STUDENT'
-        ORDER BY s.confirmed_at DESC NULLS LAST, u.name ASC
-      `, [assignmentId]);
+      const groupIds = eligibleGroups.map((g) => g._id);
+      const members = await GroupMember.find({ group_id: { $in: groupIds } }).select('user_id');
+      eligibleStudentIds = members.map((m) => m.user_id);
     }
+
+    const students = await User.find({ _id: { $in: eligibleStudentIds }, role: 'STUDENT' }).sort({ name: 1 });
+
+    const studentSubmissions = await Promise.all(
+      students.map(async (u) => {
+        const membership = await GroupMember.findOne({ user_id: u._id }).populate('group_id');
+        const sub = await Submission.findOne({
+          assignment_id: assignmentId,
+          student_id: u._id,
+        });
+
+        return {
+          student_id: u._id.toString(),
+          student_name: u.name,
+          email: u.email,
+          roll_number: u.student_id,
+          group_name: membership?.group_id?.name || 'No Group',
+          status: sub ? sub.status : 'PENDING',
+          confirmed_at: sub ? sub.confirmed_at : null,
+        };
+      })
+    );
+
+    // Sort confirmed first (by confirmed_at desc), then pending by name
+    studentSubmissions.sort((a, b) => {
+      if (a.status === 'CONFIRMED' && b.status !== 'CONFIRMED') return -1;
+      if (a.status !== 'CONFIRMED' && b.status === 'CONFIRMED') return 1;
+      if (a.confirmed_at && b.confirmed_at) return new Date(b.confirmed_at) - new Date(a.confirmed_at);
+      return a.student_name.localeCompare(b.student_name);
+    });
 
     return {
       groupSummary,
-      studentSubmissions: studentsRes.rows,
+      studentSubmissions,
     };
   }
 }

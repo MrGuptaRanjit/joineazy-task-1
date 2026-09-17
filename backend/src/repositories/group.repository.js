@@ -1,113 +1,123 @@
-const db = require('../db');
+const { Group, GroupMember, User, Assignment, AssignmentTarget, Submission } = require('../models');
 
 class GroupRepository {
   async createGroupWithCreator(name, creatorId) {
-    const client = await db.getClient();
-    try {
-      await client.query('BEGIN');
+    const group = await Group.create({
+      name: name.trim(),
+      created_by: creatorId,
+    });
 
-      // 1. Create group
-      const groupRes = await client.query(
-        `INSERT INTO groups (name, created_by)
-         VALUES ($1, $2)
-         RETURNING id, name, created_by, created_at, updated_at`,
-        [name, creatorId]
-      );
-      const group = groupRes.rows[0];
+    await GroupMember.create({
+      group_id: group._id,
+      user_id: creatorId,
+      joined_at: new Date(),
+    });
 
-      // 2. Add creator as first member
-      await client.query(
-        `INSERT INTO group_members (group_id, user_id)
-         VALUES ($1, $2)`,
-        [group.id, creatorId]
-      );
-
-      await client.query('COMMIT');
-      return group;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    return group.toJSON();
   }
 
   async findByName(name) {
-    const query = `SELECT * FROM groups WHERE LOWER(name) = LOWER($1)`;
-    const result = await db.query(query, [name]);
-    return result.rows[0] || null;
+    if (!name) return null;
+    const group = await Group.findOne({
+      name: { $regex: new RegExp(`^${name.trim()}$`, 'i') },
+    });
+    return group ? group.toJSON() : null;
   }
 
   async findById(id) {
-    const query = `
-      SELECT g.*, u.name AS creator_name, u.email AS creator_email
-      FROM groups g
-      JOIN users u ON g.created_by = u.id
-      WHERE g.id = $1
-    `;
-    const result = await db.query(query, [id]);
-    return result.rows[0] || null;
+    const group = await Group.findById(id).populate('created_by', 'name email');
+    if (!group) return null;
+
+    return {
+      id: group._id.toString(),
+      name: group.name,
+      created_by: group.created_by?._id ? group.created_by._id.toString() : group.created_by.toString(),
+      creator_name: group.created_by?.name || 'Unknown',
+      creator_email: group.created_by?.email || '',
+      created_at: group.created_at,
+      updated_at: group.updated_at,
+    };
   }
 
   async getGroupByUserId(userId) {
-    const query = `
-      SELECT g.id, g.name, g.created_by, g.created_at, g.updated_at,
-             (g.created_by = $1) AS is_creator
-      FROM groups g
-      JOIN group_members gm ON g.id = gm.group_id
-      WHERE gm.user_id = $1
-    `;
-    const result = await db.query(query, [userId]);
-    return result.rows[0] || null;
+    const membership = await GroupMember.findOne({ user_id: userId }).populate('group_id');
+    if (!membership || !membership.group_id) return null;
+
+    const group = membership.group_id;
+    return {
+      id: group._id.toString(),
+      name: group.name,
+      created_by: group.created_by.toString(),
+      created_at: group.created_at,
+      updated_at: group.updated_at,
+      is_creator: group.created_by.toString() === userId.toString(),
+    };
   }
 
   async getGroupMembers(groupId) {
-    const query = `
-      SELECT u.id, u.name, u.email, u.student_id, gm.joined_at,
-             (g.created_by = u.id) AS is_creator
-      FROM group_members gm
-      JOIN users u ON gm.user_id = u.id
-      JOIN groups g ON gm.group_id = g.id
-      WHERE gm.group_id = $1
-      ORDER BY is_creator DESC, gm.joined_at ASC
-    `;
-    const result = await db.query(query, [groupId]);
-    return result.rows;
+    const group = await Group.findById(groupId);
+    if (!group) return [];
+
+    const memberships = await GroupMember.find({ group_id: groupId })
+      .populate('user_id', 'name email student_id')
+      .sort({ joined_at: 1 });
+
+    const members = memberships
+      .filter((m) => m.user_id != null)
+      .map((m) => {
+        const u = m.user_id;
+        const isCreator = group.created_by.toString() === u._id.toString();
+        return {
+          id: u._id.toString(),
+          name: u.name,
+          email: u.email,
+          student_id: u.student_id,
+          joined_at: m.joined_at,
+          is_creator: isCreator,
+        };
+      });
+
+    // Sort creators first, then by joined_at
+    return members.sort((a, b) => (b.is_creator ? 1 : 0) - (a.is_creator ? 1 : 0));
   }
 
   async addMember(groupId, userId) {
-    const query = `
-      INSERT INTO group_members (group_id, user_id)
-      VALUES ($1, $2)
-      RETURNING id, group_id, user_id, joined_at
-    `;
-    const result = await db.query(query, [groupId, userId]);
-    return result.rows[0];
+    const membership = await GroupMember.create({
+      group_id: groupId,
+      user_id: userId,
+      joined_at: new Date(),
+    });
+    return membership.toJSON();
   }
 
   async removeMember(groupId, userId) {
-    const query = `
-      DELETE FROM group_members
-      WHERE group_id = $1 AND user_id = $2
-      RETURNING *
-    `;
-    const result = await db.query(query, [groupId, userId]);
-    return result.rows[0] || null;
+    const deleted = await GroupMember.findOneAndDelete({
+      group_id: groupId,
+      user_id: userId,
+    });
+    return deleted ? deleted.toJSON() : null;
   }
 
   async findAll() {
-    const query = `
-      SELECT g.id, g.name, g.created_by, g.created_at,
-             u.name AS creator_name,
-             COUNT(DISTINCT gm.user_id)::int AS member_count
-      FROM groups g
-      JOIN users u ON g.created_by = u.id
-      LEFT JOIN group_members gm ON g.id = gm.group_id
-      GROUP BY g.id, g.name, g.created_by, g.created_at, u.name
-      ORDER BY g.created_at DESC
-    `;
-    const result = await db.query(query);
-    return result.rows;
+    const groups = await Group.find()
+      .populate('created_by', 'name email')
+      .sort({ created_at: -1 });
+
+    const results = await Promise.all(
+      groups.map(async (g) => {
+        const memberCount = await GroupMember.countDocuments({ group_id: g._id });
+        return {
+          id: g._id.toString(),
+          name: g.name,
+          created_by: g.created_by?._id ? g.created_by._id.toString() : g.created_by.toString(),
+          creator_name: g.created_by?.name || 'Unknown',
+          created_at: g.created_at,
+          member_count: memberCount,
+        };
+      })
+    );
+
+    return results;
   }
 
   async getGroupAudit(groupId) {
@@ -116,30 +126,29 @@ class GroupRepository {
 
     const members = await this.getGroupMembers(groupId);
 
-    // Get assignments targeted to ALL or this group
-    const assignmentsRes = await db.query(`
-      SELECT a.id, a.title, a.due_date, a.target_type, a.onedrive_link
-      FROM assignments a
-      LEFT JOIN assignment_targets at ON a.id = at.assignment_id AND at.group_id = $1
-      WHERE a.target_type = 'ALL' OR at.group_id IS NOT NULL
-      ORDER BY a.due_date ASC
-    `, [groupId]);
+    // Find assignments targeted to ALL or targeted to this group
+    const targetedRecords = await AssignmentTarget.find({ group_id: groupId }).select('assignment_id');
+    const targetedAssignmentIds = targetedRecords.map((t) => t.assignment_id);
+
+    const assignments = await Assignment.find({
+      $or: [{ target_type: 'ALL' }, { _id: { $in: targetedAssignmentIds } }],
+    }).sort({ due_date: 1 });
 
     const assignmentsWithSubmissions = [];
     let totalConfirmedOverall = 0;
 
-    for (const a of assignmentsRes.rows) {
+    for (const a of assignments) {
       const memberStatuses = [];
       let confirmedCount = 0;
 
       for (const m of members) {
-        const subRes = await db.query(`
-          SELECT status, confirmed_at
-          FROM submissions
-          WHERE assignment_id = $1 AND student_id = $2 AND status = 'CONFIRMED'
-        `, [a.id, m.id]);
+        const submission = await Submission.findOne({
+          assignment_id: a._id,
+          student_id: m.id,
+          status: 'CONFIRMED',
+        });
 
-        const isConfirmed = subRes.rows.length > 0;
+        const isConfirmed = !!submission;
         if (isConfirmed) confirmedCount++;
 
         memberStatuses.push({
@@ -148,7 +157,7 @@ class GroupRepository {
           email: m.email,
           roll_number: m.student_id,
           status: isConfirmed ? 'CONFIRMED' : 'PENDING',
-          confirmed_at: subRes.rows[0]?.confirmed_at || null,
+          confirmed_at: submission ? submission.confirmed_at : null,
         });
       }
 
@@ -157,7 +166,7 @@ class GroupRepository {
       const rate = totalMembers > 0 ? Number(((confirmedCount / totalMembers) * 100).toFixed(2)) : 0;
 
       assignmentsWithSubmissions.push({
-        id: a.id,
+        id: a._id.toString(),
         title: a.title,
         due_date: a.due_date,
         target_type: a.target_type,
@@ -170,10 +179,11 @@ class GroupRepository {
       });
     }
 
-    const totalPossibleSubmissions = members.length * assignmentsRes.rows.length;
-    const overallCompletionRate = totalPossibleSubmissions > 0
-      ? Number(((totalConfirmedOverall / totalPossibleSubmissions) * 100).toFixed(2))
-      : 0;
+    const totalPossibleSubmissions = members.length * assignments.length;
+    const overallCompletionRate =
+      totalPossibleSubmissions > 0
+        ? Number(((totalConfirmedOverall / totalPossibleSubmissions) * 100).toFixed(2))
+        : 0;
 
     return {
       group,

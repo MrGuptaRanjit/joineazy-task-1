@@ -1,191 +1,211 @@
-const db = require('../db');
+const { Assignment, AssignmentTarget, Submission, Group, GroupMember, User } = require('../models');
 
 class AssignmentRepository {
   async createAssignment({ title, description, dueDate, onedriveLink, targetType, createdBy, groupIds = [] }) {
-    const client = await db.getClient();
-    try {
-      await client.query('BEGIN');
+    const assignment = await Assignment.create({
+      title: title.trim(),
+      description: description.trim(),
+      due_date: new Date(dueDate),
+      onedrive_link: onedriveLink.trim(),
+      target_type: targetType || 'ALL',
+      created_by: createdBy,
+    });
 
-      const assignmentRes = await client.query(
-        `INSERT INTO assignments (title, description, due_date, onedrive_link, target_type, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING *`,
-        [title, description, dueDate, onedriveLink, targetType, createdBy]
-      );
-      const assignment = assignmentRes.rows[0];
-
-      if (targetType === 'GROUPS' && Array.isArray(groupIds) && groupIds.length > 0) {
-        for (const groupId of groupIds) {
-          await client.query(
-            `INSERT INTO assignment_targets (assignment_id, group_id)
-             VALUES ($1, $2)
-             ON CONFLICT (assignment_id, group_id) DO NOTHING`,
-            [assignment.id, groupId]
-          );
-        }
-      }
-
-      await client.query('COMMIT');
-      return assignment;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+    if (targetType === 'GROUPS' && Array.isArray(groupIds) && groupIds.length > 0) {
+      const targetDocs = groupIds.map((groupId) => ({
+        assignment_id: assignment._id,
+        group_id: groupId,
+      }));
+      await AssignmentTarget.insertMany(targetDocs, { ordered: false }).catch(() => {});
     }
+
+    return assignment.toJSON();
   }
 
   async updateAssignment(id, { title, description, dueDate, onedriveLink, targetType, groupIds }) {
-    const client = await db.getClient();
-    try {
-      await client.query('BEGIN');
+    const updateFields = {};
+    if (title !== undefined) updateFields.title = title.trim();
+    if (description !== undefined) updateFields.description = description.trim();
+    if (dueDate !== undefined) updateFields.due_date = new Date(dueDate);
+    if (onedriveLink !== undefined) updateFields.onedrive_link = onedriveLink.trim();
+    if (targetType !== undefined) updateFields.target_type = targetType;
 
-      const updateRes = await client.query(
-        `UPDATE assignments
-         SET title = COALESCE($1, title),
-             description = COALESCE($2, description),
-             due_date = COALESCE($3, due_date),
-             onedrive_link = COALESCE($4, onedrive_link),
-             target_type = COALESCE($5, target_type),
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = $6
-         RETURNING *`,
-        [title, description, dueDate, onedriveLink, targetType, id]
-      );
+    const updated = await Assignment.findByIdAndUpdate(id, updateFields, { new: true });
+    if (!updated) return null;
 
-      const updated = updateRes.rows[0];
-
-      if (targetType === 'GROUPS' && Array.isArray(groupIds)) {
-        await client.query(`DELETE FROM assignment_targets WHERE assignment_id = $1`, [id]);
-        for (const groupId of groupIds) {
-          await client.query(
-            `INSERT INTO assignment_targets (assignment_id, group_id)
-             VALUES ($1, $2)
-             ON CONFLICT (assignment_id, group_id) DO NOTHING`,
-            [id, groupId]
-          );
-        }
-      } else if (targetType === 'ALL') {
-        await client.query(`DELETE FROM assignment_targets WHERE assignment_id = $1`, [id]);
+    if (targetType === 'GROUPS' && Array.isArray(groupIds)) {
+      await AssignmentTarget.deleteMany({ assignment_id: id });
+      if (groupIds.length > 0) {
+        const targetDocs = groupIds.map((groupId) => ({
+          assignment_id: id,
+          group_id: groupId,
+        }));
+        await AssignmentTarget.insertMany(targetDocs, { ordered: false }).catch(() => {});
       }
-
-      await client.query('COMMIT');
-      return updated;
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
+    } else if (targetType === 'ALL') {
+      await AssignmentTarget.deleteMany({ assignment_id: id });
     }
+
+    return updated.toJSON();
   }
 
   async deleteAssignment(id) {
-    const query = `DELETE FROM assignments WHERE id = $1 RETURNING *`;
-    const result = await db.query(query, [id]);
-    return result.rows[0] || null;
+    const deleted = await Assignment.findByIdAndDelete(id);
+    if (!deleted) return null;
+
+    await Promise.all([
+      AssignmentTarget.deleteMany({ assignment_id: id }),
+      Submission.deleteMany({ assignment_id: id }),
+    ]);
+
+    return deleted.toJSON();
   }
 
   async findById(id) {
-    const query = `
-      SELECT a.*, u.name AS creator_name
-      FROM assignments a
-      JOIN users u ON a.created_by = u.id
-      WHERE a.id = $1
-    `;
-    const result = await db.query(query, [id]);
-    if (!result.rows[0]) return null;
+    const assignment = await Assignment.findById(id).populate('created_by', 'name email');
+    if (!assignment) return null;
 
-    const assignment = result.rows[0];
-    const targetsRes = await db.query(`
-      SELECT g.id, g.name
-      FROM assignment_targets at
-      JOIN groups g ON at.group_id = g.id
-      WHERE at.assignment_id = $1
-    `, [id]);
+    const targets = await AssignmentTarget.find({ assignment_id: id }).populate('group_id', 'name');
+    const target_groups = targets
+      .filter((t) => t.group_id != null)
+      .map((t) => ({
+        id: t.group_id._id.toString(),
+        name: t.group_id.name,
+      }));
 
-    assignment.target_groups = targetsRes.rows;
-    return assignment;
+    return {
+      id: assignment._id.toString(),
+      title: assignment.title,
+      description: assignment.description,
+      due_date: assignment.due_date,
+      onedrive_link: assignment.onedrive_link,
+      target_type: assignment.target_type,
+      created_by: assignment.created_by?._id ? assignment.created_by._id.toString() : assignment.created_by.toString(),
+      creator_name: assignment.created_by?.name || 'Admin',
+      created_at: assignment.created_at,
+      updated_at: assignment.updated_at,
+      target_groups,
+    };
   }
 
   async findAllForAdmin() {
-    const assignmentsRes = await db.query(`
-      SELECT a.id, a.title, a.description, a.due_date, a.onedrive_link, a.target_type, a.created_by, a.created_at, a.updated_at,
-             u.name AS creator_name
-      FROM assignments a
-      JOIN users u ON a.created_by = u.id
-      ORDER BY a.due_date ASC
-    `);
+    const assignments = await Assignment.find()
+      .populate('created_by', 'name email')
+      .sort({ due_date: 1 });
 
-    const targetsRes = await db.query(`
-      SELECT at.assignment_id, g.id, g.name
-      FROM assignment_targets at
-      JOIN groups g ON at.group_id = g.id
-    `);
+    const results = await Promise.all(
+      assignments.map(async (a) => {
+        const targets = await AssignmentTarget.find({ assignment_id: a._id }).populate('group_id', 'name');
+        const target_groups = targets
+          .filter((t) => t.group_id != null)
+          .map((t) => ({
+            id: t.group_id._id.toString(),
+            name: t.group_id.name,
+          }));
 
-    const submissionsRes = await db.query(`
-      SELECT assignment_id, COUNT(*)::int AS count
-      FROM submissions
-      WHERE status = 'CONFIRMED'
-      GROUP BY assignment_id
-    `);
+        const total_confirmed_submissions = await Submission.countDocuments({
+          assignment_id: a._id,
+          status: 'CONFIRMED',
+        });
 
-    const targetsByAssignment = {};
-    targetsRes.rows.forEach((row) => {
-      if (!targetsByAssignment[row.assignment_id]) {
-        targetsByAssignment[row.assignment_id] = [];
-      }
-      targetsByAssignment[row.assignment_id].push({ id: row.id, name: row.name });
-    });
+        return {
+          id: a._id.toString(),
+          title: a.title,
+          description: a.description,
+          due_date: a.due_date,
+          onedrive_link: a.onedrive_link,
+          target_type: a.target_type,
+          created_by: a.created_by?._id ? a.created_by._id.toString() : a.created_by.toString(),
+          creator_name: a.created_by?.name || 'Admin',
+          created_at: a.created_at,
+          updated_at: a.updated_at,
+          target_groups,
+          total_confirmed_submissions,
+        };
+      })
+    );
 
-    const submissionsByAssignment = {};
-    submissionsRes.rows.forEach((row) => {
-      submissionsByAssignment[row.assignment_id] = row.count;
-    });
-
-    return assignmentsRes.rows.map((assignment) => ({
-      ...assignment,
-      target_groups: targetsByAssignment[assignment.id] || [],
-      total_confirmed_submissions: submissionsByAssignment[assignment.id] || 0,
-    }));
+    return results;
   }
 
   async findVisibleForStudent(studentId) {
-    const query = `
-      SELECT DISTINCT a.*, 
-             s.status AS submission_status, 
-             s.confirmed_at,
-             (s.status = 'CONFIRMED') AS is_submitted
-      FROM assignments a
-      LEFT JOIN assignment_targets at ON a.id = at.assignment_id
-      LEFT JOIN group_members gm ON gm.user_id = $1
-      LEFT JOIN submissions s ON s.assignment_id = a.id AND s.student_id = $1
-      WHERE a.target_type = 'ALL' 
-         OR (a.target_type = 'GROUPS' AND at.group_id = gm.group_id)
-      ORDER BY a.due_date ASC
-    `;
-    const result = await db.query(query, [studentId]);
-    return result.rows;
+    const membership = await GroupMember.findOne({ user_id: studentId });
+    const studentGroupId = membership ? membership.group_id : null;
+
+    let targetedAssignmentIds = [];
+    if (studentGroupId) {
+      const targets = await AssignmentTarget.find({ group_id: studentGroupId }).select('assignment_id');
+      targetedAssignmentIds = targets.map((t) => t.assignment_id);
+    }
+
+    const assignments = await Assignment.find({
+      $or: [{ target_type: 'ALL' }, { _id: { $in: targetedAssignmentIds } }],
+    }).sort({ due_date: 1 });
+
+    const results = await Promise.all(
+      assignments.map(async (a) => {
+        const sub = await Submission.findOne({
+          assignment_id: a._id,
+          student_id: studentId,
+        });
+
+        return {
+          id: a._id.toString(),
+          title: a.title,
+          description: a.description,
+          due_date: a.due_date,
+          onedrive_link: a.onedrive_link,
+          target_type: a.target_type,
+          created_by: a.created_by.toString(),
+          created_at: a.created_at,
+          updated_at: a.updated_at,
+          submission_status: sub ? sub.status : 'PENDING',
+          confirmed_at: sub ? sub.confirmed_at : null,
+          is_submitted: sub?.status === 'CONFIRMED',
+        };
+      })
+    );
+
+    return results;
   }
 
   async getStudentAssignmentDetails(assignmentId, studentId) {
-    const query = `
-      SELECT a.*, 
-             s.status AS submission_status, 
-             s.confirmed_at,
-             (s.status = 'CONFIRMED') AS is_submitted,
-             gm.group_id AS student_group_id,
-             g.name AS student_group_name
-      FROM assignments a
-      LEFT JOIN assignment_targets at ON a.id = at.assignment_id
-      LEFT JOIN group_members gm ON gm.user_id = $2
-      LEFT JOIN groups g ON gm.group_id = g.id
-      LEFT JOIN submissions s ON s.assignment_id = a.id AND s.student_id = $2
-      WHERE a.id = $1
-        AND (a.target_type = 'ALL' OR at.group_id = gm.group_id)
-      LIMIT 1
-    `;
-    const result = await db.query(query, [assignmentId, studentId]);
-    return result.rows[0] || null;
+    const membership = await GroupMember.findOne({ user_id: studentId }).populate('group_id');
+    const studentGroup = membership?.group_id;
+
+    const assignment = await Assignment.findById(assignmentId);
+    if (!assignment) return null;
+
+    if (assignment.target_type === 'GROUPS') {
+      if (!studentGroup) return null;
+      const isTargeted = await AssignmentTarget.findOne({
+        assignment_id: assignmentId,
+        group_id: studentGroup._id,
+      });
+      if (!isTargeted) return null;
+    }
+
+    const sub = await Submission.findOne({
+      assignment_id: assignmentId,
+      student_id: studentId,
+    });
+
+    return {
+      id: assignment._id.toString(),
+      title: assignment.title,
+      description: assignment.description,
+      due_date: assignment.due_date,
+      onedrive_link: assignment.onedrive_link,
+      target_type: assignment.target_type,
+      created_by: assignment.created_by.toString(),
+      created_at: assignment.created_at,
+      updated_at: assignment.updated_at,
+      submission_status: sub ? sub.status : 'PENDING',
+      confirmed_at: sub ? sub.confirmed_at : null,
+      is_submitted: sub?.status === 'CONFIRMED',
+      student_group_id: studentGroup ? studentGroup._id.toString() : null,
+      student_group_name: studentGroup ? studentGroup.name : null,
+    };
   }
 }
 

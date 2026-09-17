@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const mongoose = require('mongoose');
 const config = require('./config');
 const apiRoutes = require('./routes');
 const { errorHandler, notFoundHandler } = require('./middleware/error.middleware');
@@ -12,10 +13,12 @@ const corsOptions = {
     if (!origin) return callback(null, true);
 
     const configuredOrigins = process.env.CORS_ORIGIN
-      ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim())
+      ? (process.env.CORS_ORIGIN === '*'
+          ? true
+          : process.env.CORS_ORIGIN.split(',').map((s) => s.trim()))
       : ['http://localhost:3000', 'http://localhost:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:5173'];
 
-    if (configuredOrigins.includes(origin)) {
+    if (configuredOrigins === true || (Array.isArray(configuredOrigins) && configuredOrigins.includes(origin))) {
       return callback(null, true);
     }
 
@@ -38,12 +41,15 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-
-// Health Check Endpoint
+// Health Check Endpoint (Public & returns MongoDB connection status)
 app.get('/api/health', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'Joineazy Student, Group & Assignment Management API is healthy and running.',
+  const isDbConnected = mongoose.connection.readyState === 1;
+  const status = isDbConnected ? 'connected' : 'disconnected';
+
+  res.status(isDbConnected ? 200 : 503).json({
+    success: isDbConnected,
+    message: isDbConnected ? 'Joineazy API is running' : 'Joineazy API running with database disconnected',
+    database: status,
     timestamp: new Date().toISOString(),
     environment: config.nodeEnv,
   });

@@ -1,101 +1,196 @@
+const mongoose = require('mongoose');
 const { hashPassword } = require('../utils/password.util');
-const db = require('./index');
+const { connectDB, disconnectDB } = require('./index');
+const {
+  User,
+  Group,
+  GroupMember,
+  Assignment,
+  AssignmentTarget,
+  Submission,
+} = require('../models');
 
 const runSeed = async () => {
   try {
-    console.log(' Starting database seeding...');
+    console.log('\n==================================================');
+    console.log(' Starting MongoDB Demo Database Seeding...');
+    console.log('==================================================\n');
 
-    // 1. Generate password hashes
+    await connectDB();
+
+    // 1. Clean existing collections
+    console.log('🧹 Clearing existing collections...');
+    await Promise.all([
+      User.deleteMany({}),
+      Group.deleteMany({}),
+      GroupMember.deleteMany({}),
+      Assignment.deleteMany({}),
+      AssignmentTarget.deleteMany({}),
+      Submission.deleteMany({}),
+    ]);
+    console.log(' Collections cleared.');
+
+    // 2. Generate password hashes
     const defaultPasswordHash = await hashPassword('Password123!');
     const adminPasswordHash = await hashPassword('Admin123!');
 
-    // 2. Clean existing tables
-    await db.query(`
-      TRUNCATE TABLE submissions, assignment_targets, assignments, group_members, groups, users CASCADE;
-    `);
-
     // 3. Seed Users
-    const usersQuery = `
-      INSERT INTO users (id, name, email, password_hash, role, student_id)
-      VALUES 
-        ('a0000000-0000-0000-0000-000000000001', 'Prof. Alan Turing', 'admin@university.edu', $1, 'ADMIN', NULL),
-        ('a0000000-0000-0000-0000-000000000002', 'Alex Johnson', 'alex@student.edu', $2, 'STUDENT', 'STU1001'),
-        ('a0000000-0000-0000-0000-000000000003', 'Brianna Smith', 'brianna@student.edu', $2, 'STUDENT', 'STU1002'),
-        ('a0000000-0000-0000-0000-000000000004', 'Carlos Mendez', 'carlos@student.edu', $2, 'STUDENT', 'STU1003'),
-        ('a0000000-0000-0000-0000-000000000005', 'Diana Prince', 'diana@student.edu', $2, 'STUDENT', 'STU1004'),
-        ('a0000000-0000-0000-0000-000000000006', 'Ethan Hunt', 'ethan@student.edu', $2, 'STUDENT', 'STU1005')
-      RETURNING id, name, email, role, student_id;
-    `;
-    await db.query(usersQuery, [adminPasswordHash, defaultPasswordHash]);
-    console.log(' Users seeded (1 Admin, 5 Students).');
+    console.log(' Seeding users...');
+    const adminUser = await User.create({
+      name: 'Prof. Alan Turing',
+      email: 'admin@university.edu',
+      password_hash: adminPasswordHash,
+      role: 'ADMIN',
+      student_id: null,
+    });
+
+    const students = await User.create([
+      {
+        name: 'Alex Johnson',
+        email: 'alex@student.edu',
+        password_hash: defaultPasswordHash,
+        role: 'STUDENT',
+        student_id: 'STU1001',
+      },
+      {
+        name: 'Brianna Smith',
+        email: 'brianna@student.edu',
+        password_hash: defaultPasswordHash,
+        role: 'STUDENT',
+        student_id: 'STU1002',
+      },
+      {
+        name: 'Carlos Mendez',
+        email: 'carlos@student.edu',
+        password_hash: defaultPasswordHash,
+        role: 'STUDENT',
+        student_id: 'STU1003',
+      },
+      {
+        name: 'Diana Prince',
+        email: 'diana@student.edu',
+        password_hash: defaultPasswordHash,
+        role: 'STUDENT',
+        student_id: 'STU1004',
+      },
+      {
+        name: 'Ethan Hunt',
+        email: 'ethan@student.edu',
+        password_hash: defaultPasswordHash,
+        role: 'STUDENT',
+        student_id: 'STU1005',
+      },
+    ]);
+
+    const [alex, brianna, carlos, diana, ethan] = students;
+    console.log(` Users seeded: 1 Admin, ${students.length} Students.`);
 
     // 4. Seed Groups
-    const groupsQuery = `
-      INSERT INTO groups (id, name, created_by)
-      VALUES 
-        ('b0000000-0000-0000-0000-000000000001', 'Cloud Architects Alpha', 'a0000000-0000-0000-0000-000000000002'),
-        ('b0000000-0000-0000-0000-000000000002', 'Distributed Systems Beta', 'a0000000-0000-0000-0000-000000000004')
-      RETURNING id, name;
-    `;
-    await db.query(groupsQuery);
-    console.log(' Groups seeded (2 Groups).');
+    console.log('👥 Seeding groups...');
+    const groupAlpha = await Group.create({
+      name: 'Cloud Architects Alpha',
+      created_by: alex._id,
+    });
+
+    const groupBeta = await Group.create({
+      name: 'Distributed Systems Beta',
+      created_by: carlos._id,
+    });
 
     // 5. Seed Group Members
-    const membersQuery = `
-      INSERT INTO group_members (group_id, user_id)
-      VALUES 
-        ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002'),
-        ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000003'),
-        ('b0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000004'),
-        ('b0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000005');
-    `;
-    await db.query(membersQuery);
-    console.log(' Group members seeded.');
+    console.log(' Seeding group members...');
+    await GroupMember.create([
+      // Group Alpha members
+      { group_id: groupAlpha._id, user_id: alex._id, joined_at: new Date(Date.now() - 5 * 86400000) },
+      { group_id: groupAlpha._id, user_id: brianna._id, joined_at: new Date(Date.now() - 4 * 86400000) },
+      { group_id: groupAlpha._id, user_id: diana._id, joined_at: new Date(Date.now() - 3 * 86400000) },
+      // Group Beta members
+      { group_id: groupBeta._id, user_id: carlos._id, joined_at: new Date(Date.now() - 4 * 86400000) },
+      { group_id: groupBeta._id, user_id: ethan._id, joined_at: new Date(Date.now() - 2 * 86400000) },
+    ]);
+    console.log(' Group memberships established.');
 
     // 6. Seed Assignments
-    const assignmentsQuery = `
-      INSERT INTO assignments (id, title, description, due_date, onedrive_link, target_type, created_by)
-      VALUES 
-        ('c0000000-0000-0000-0000-000000000001', 'Assignment 1: Microservices Architecture Blueprint', 'Design a scalable e-commerce microservices architecture using Docker and Kubernetes. Submit your final system diagram and specification document to OneDrive.', NOW() + INTERVAL '7 days', 'https://onedrive.live.com/demo-assignment-1', 'ALL', 'a0000000-0000-0000-0000-000000000001'),
-        ('c0000000-0000-0000-0000-000000000002', 'Assignment 2: Distributed Consensus & Raft Protocol', 'Deep dive into Raft consensus implementation. Provide benchmark graphs and cluster node recovery reports in the OneDrive folder.', NOW() + INTERVAL '14 days', 'https://onedrive.live.com/demo-assignment-2', 'GROUPS', 'a0000000-0000-0000-0000-000000000001'),
-        ('c0000000-0000-0000-0000-000000000003', 'Assignment 3: PostgreSQL Query Optimization & Indexing', 'Analyze EXPLAIN ANALYZE query plans on multi-million row datasets and document B-Tree / GIN index tradeoffs.', NOW() + INTERVAL '21 days', 'https://onedrive.live.com/demo-assignment-3', 'ALL', 'a0000000-0000-0000-0000-000000000001');
-    `;
-    await db.query(assignmentsQuery);
-    console.log(' Assignments seeded (3 Assignments).');
+    console.log('📚 Seeding coursework assignments...');
+    const now = new Date();
+    const assignment1 = await Assignment.create({
+      title: 'Assignment 1: Distributed Systems & Microservices Project',
+      description:
+        'Architect and deploy a resilient microservices application with inter-service communication, circuit breaking, and load balancing across Docker containers.',
+      due_date: new Date(now.getTime() + 7 * 86400000), // +7 days
+      onedrive_link: 'https://onedrive.live.com/view.aspx?resid=Joineazy-Microservices-Lab-Folder',
+      target_type: 'ALL',
+      created_by: adminUser._id,
+    });
 
-    // 7. Seed Assignment Targets (Assignment 2 -> Cloud Architects Alpha)
-    const targetsQuery = `
-      INSERT INTO assignment_targets (assignment_id, group_id)
-      VALUES 
-        ('c0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001');
-    `;
-    await db.query(targetsQuery);
-    console.log(' Assignment targets seeded.');
+    const assignment2 = await Assignment.create({
+      title: 'Assignment 2: Cloud Infrastructure & Docker Deployment',
+      description:
+        'Configure multi-container orchestration using Docker Compose, reverse proxy routing with NGINX, and zero-downtime deployment pipelines.',
+      due_date: new Date(now.getTime() + 14 * 86400000), // +14 days
+      onedrive_link: 'https://onedrive.live.com/view.aspx?resid=Joineazy-Cloud-Infra-Lab-Folder',
+      target_type: 'GROUPS',
+      created_by: adminUser._id,
+    });
 
-    // 8. Seed Submissions (Confirmed & Pending statuses)
-    const submissionsQuery = `
-      INSERT INTO submissions (assignment_id, student_id, group_id, status, confirmed_at)
-      VALUES 
-        ('c0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001', 'CONFIRMED', NOW() - INTERVAL '2 days'),
-        ('c0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000002', 'CONFIRMED', NOW() - INTERVAL '1 days'),
-        ('c0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001', 'CONFIRMED', NOW() - INTERVAL '6 hours');
-    `;
-    await db.query(submissionsQuery);
-    console.log(' Submissions seeded.');
+    const assignment3 = await Assignment.create({
+      title: 'Assignment 3: Advanced Full-Stack Security & Auth Hardening',
+      description:
+        'Implement role-based access control, cryptographic password hashing, stateless JWT session verification, and OWASP Top 10 mitigation strategies.',
+      due_date: new Date(now.getTime() + 21 * 86400000), // +21 days
+      onedrive_link: 'https://onedrive.live.com/view.aspx?resid=Joineazy-Security-Hardening-Folder',
+      target_type: 'ALL',
+      created_by: adminUser._id,
+    });
 
-    console.log('\n Seed Data Summary:');
-    console.log('======================================================');
-    console.log('Admin Account:   admin@university.edu  / Admin123!');
-    console.log('Student 1:       alex@student.edu      / Password123! (ID: STU1001, Group Alpha)');
-    console.log('Student 2:       brianna@student.edu   / Password123! (ID: STU1002, Group Alpha)');
-    console.log('Student 3:       carlos@student.edu    / Password123! (ID: STU1003, Group Beta)');
-    console.log('Student 4:       diana@student.edu     / Password123! (ID: STU1004, Group Beta)');
-    console.log('Student 5 (No Group): ethan@student.edu / Password123! (ID: STU1005)');
-    console.log('======================================================\n');
+    // Target Assignment 2 specifically to Group Alpha
+    await AssignmentTarget.create({
+      assignment_id: assignment2._id,
+      group_id: groupAlpha._id,
+    });
+    console.log(' Assignments and targets created.');
 
+    // 7. Seed Submissions (Confirmations)
+    console.log(' Submitting initial confirmations...');
+    await Submission.create([
+      {
+        assignment_id: assignment1._id,
+        student_id: alex._id,
+        group_id: groupAlpha._id,
+        status: 'CONFIRMED',
+        confirmed_at: new Date(Date.now() - 1 * 86400000),
+      },
+      {
+        assignment_id: assignment1._id,
+        student_id: brianna._id,
+        group_id: groupAlpha._id,
+        status: 'CONFIRMED',
+        confirmed_at: new Date(Date.now() - 12 * 3600000),
+      },
+      {
+        assignment_id: assignment1._id,
+        student_id: carlos._id,
+        group_id: groupBeta._id,
+        status: 'CONFIRMED',
+        confirmed_at: new Date(Date.now() - 6 * 3600000),
+      },
+    ]);
+    console.log(' Submissions recorded.');
+
+    console.log('\n==================================================');
+    console.log(' MongoDB database successfully seeded with demo data!');
+    console.log('==================================================');
+    console.log(' Accounts for testing:');
+    console.log('   Admin:   admin@university.edu / Admin123!');
+    console.log('   Student: alex@student.edu    / Password123!');
+    console.log('   Student: carlos@student.edu  / Password123!');
+    console.log('==================================================\n');
+
+    await disconnectDB();
     process.exit(0);
   } catch (error) {
-    console.error(' Seeding failed:', error);
+    console.error('\n❌ MongoDB Seeding failed:', error);
+    await disconnectDB();
     process.exit(1);
   }
 };

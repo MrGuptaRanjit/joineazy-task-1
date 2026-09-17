@@ -1,6 +1,7 @@
 const { body, param } = require('express-validator');
+const mongoose = require('mongoose');
 
-const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const isValidObjectId = (val) => mongoose.Types.ObjectId.isValid(val);
 
 const createGroupValidator = [
   body('name')
@@ -11,7 +12,7 @@ const createGroupValidator = [
 
 const addMemberValidator = [
   param('id')
-    .matches(uuidRegex).withMessage('Invalid group ID format'),
+    .custom((val) => isValidObjectId(val)).withMessage('Invalid group ID format'),
   body('identifier')
     .trim()
     .notEmpty().withMessage('Student email or Student ID is required to add/invite a member'),
@@ -19,9 +20,9 @@ const addMemberValidator = [
 
 const removeMemberValidator = [
   param('id')
-    .matches(uuidRegex).withMessage('Invalid group ID format'),
+    .custom((val) => isValidObjectId(val)).withMessage('Invalid group ID format'),
   param('userId')
-    .matches(uuidRegex).withMessage('Invalid user ID format'),
+    .custom((val) => isValidObjectId(val)).withMessage('Invalid user ID format'),
 ];
 
 module.exports = {

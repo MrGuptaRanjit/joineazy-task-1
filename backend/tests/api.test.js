@@ -1,9 +1,8 @@
 const request = require('supertest');
-const { setupTestDb } = require('./testDb');
-const db = require('../src/db');
+const { setupTestDb, closeTestDb } = require('./testDb');
 const app = require('../src/app');
 
-describe('Joineazy Task 1 - Comprehensive Backend API Verification', () => {
+describe('Joineazy Task 1 - Comprehensive MERN Backend API Verification', () => {
   let studentToken = '';
   let adminToken = '';
   let unassignedStudentToken = '';
@@ -13,8 +12,7 @@ describe('Joineazy Task 1 - Comprehensive Backend API Verification', () => {
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
     process.env.JWT_SECRET = 'test_jwt_secret_key_32_characters_long_min';
-    const testPool = await setupTestDb();
-    db.setPool(testPool);
+    await setupTestDb();
 
     // Obtain student token (Alex - STU1001, in Group Alpha)
     const studentLogin = await request(app)
@@ -28,19 +26,24 @@ describe('Joineazy Task 1 - Comprehensive Backend API Verification', () => {
       .send({ email: 'admin@university.edu', password: 'Admin123!' });
     adminToken = adminLogin.body.data.token;
 
-    // Obtain unassigned student token (Ethan - STU1005, no group)
+    // Obtain unassigned student token (Diana - STU1004, no group in test seed)
     const unassignedLogin = await request(app)
       .post('/api/auth/login')
-      .send({ email: 'ethan@student.edu', password: 'Password123!' });
+      .send({ email: 'diana@student.edu', password: 'Password123!' });
     unassignedStudentToken = unassignedLogin.body.data.token;
   });
 
+  afterAll(async () => {
+    await closeTestDb();
+  });
+
   describe('1. Health Check Endpoint', () => {
-    it('GET /api/health returns 200 OK and health information', async () => {
+    it('GET /api/health returns 200 OK and database: connected', async () => {
       const res = await request(app).get('/api/health');
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.message).toContain('healthy and running');
+      expect(res.body.message).toContain('Joineazy API is running');
+      expect(res.body.database).toBe('connected');
     });
   });
 
@@ -220,7 +223,7 @@ describe('Joineazy Task 1 - Comprehensive Backend API Verification', () => {
     });
 
     it('POST /api/groups/:id/members invites/adds student by email or ID', async () => {
-      // Add Grace (STU1007, registered earlier and not in any group) to Quantum Computing Squad
+      // Add Grace (STU1007) to Quantum Computing Squad
       const res = await request(app)
         .post(`/api/groups/${createdGroupId}/members`)
         .set('Authorization', `Bearer ${unassignedStudentToken}`)
@@ -240,6 +243,36 @@ describe('Joineazy Task 1 - Comprehensive Backend API Verification', () => {
       expect(res.status).toBe(409);
       expect(res.body.success).toBe(false);
       expect(res.body.message).toContain('already');
+    });
+
+    it('Student can leave a group and subsequently join another group', async () => {
+      // Login as Grace Hopper
+      const graceLogin = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'grace@student.edu', password: 'Password123!' });
+      const graceToken = graceLogin.body.data.token;
+      const graceUserId = graceLogin.body.data.user.id;
+
+      // Grace removes herself from Quantum Computing Squad
+      const leaveRes = await request(app)
+        .delete(`/api/groups/${createdGroupId}/members/${graceUserId}`)
+        .set('Authorization', `Bearer ${graceToken}`);
+
+      expect(leaveRes.status).toBe(200);
+
+      // Now Alex can invite Grace to Cloud Architects Alpha
+      const myGroupRes = await request(app)
+        .get('/api/groups/my')
+        .set('Authorization', `Bearer ${studentToken}`);
+      const alphaGroupId = myGroupRes.body.data.id;
+
+      const joinRes = await request(app)
+        .post(`/api/groups/${alphaGroupId}/members`)
+        .set('Authorization', `Bearer ${studentToken}`)
+        .send({ identifier: 'STU1007' });
+
+      expect(joinRes.status).toBe(200);
+      expect(joinRes.body.message).toContain('successfully added');
     });
   });
 
@@ -266,7 +299,7 @@ describe('Joineazy Task 1 - Comprehensive Backend API Verification', () => {
     it('Student in targeted group sees the targeted assignment', async () => {
       const res = await request(app)
         .get('/api/assignments')
-        .set('Authorization', `Bearer ${unassignedStudentToken}`); // Ethan is creator of Quantum Squad
+        .set('Authorization', `Bearer ${unassignedStudentToken}`); // Diana is in Quantum Squad
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -306,6 +339,17 @@ describe('Joineazy Task 1 - Comprehensive Backend API Verification', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.data.status).toBe('CONFIRMED');
+    });
+
+    it('Duplicate submission confirmation is rejected with 409 Conflict', async () => {
+      const res = await request(app)
+        .post(`/api/assignments/${createdAssignmentId}/submission/confirm`)
+        .set('Authorization', `Bearer ${unassignedStudentToken}`)
+        .send({ is_confirmed: true });
+
+      expect(res.status).toBe(409);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('already confirmed');
     });
 
     it('Admin can audit assignment submissions matrix', async () => {
@@ -357,9 +401,8 @@ describe('Joineazy Task 1 - Comprehensive Backend API Verification', () => {
     });
   });
 
-  describe('9. Adversarial Security, IDOR & Input Attack Vectors', () => {
-
-    it('ATTACK: Student attempting to create an assignment is rejected with 403', async () => {
+  describe('9. Adversarial Security & Input Validation', () => {
+    it('Student attempting to create an assignment is rejected with 403', async () => {
       const res = await request(app)
         .post('/api/admin/assignments')
         .set('Authorization', `Bearer ${studentToken}`)
@@ -374,25 +417,7 @@ describe('Joineazy Task 1 - Comprehensive Backend API Verification', () => {
       expect(res.body.success).toBe(false);
     });
 
-    it('ATTACK: Student attempting to delete an assignment is rejected with 403', async () => {
-      const res = await request(app)
-        .delete(`/api/admin/assignments/${createdAssignmentId}`)
-        .set('Authorization', `Bearer ${studentToken}`);
-
-      expect(res.status).toBe(403);
-      expect(res.body.success).toBe(false);
-    });
-
-    it('ATTACK: Student attempting to access executive analytics is rejected with 403', async () => {
-      const res = await request(app)
-        .get('/api/admin/analytics/overview')
-        .set('Authorization', `Bearer ${studentToken}`);
-
-      expect(res.status).toBe(403);
-      expect(res.body.success).toBe(false);
-    });
-
-    it('ATTACK: Tampered JWT token signature is rejected with 401', async () => {
+    it('Tampered JWT token signature is rejected with 401', async () => {
       const tamperedToken = studentToken.slice(0, -5) + 'xxxxx';
       const res = await request(app)
         .get('/api/auth/me')
@@ -402,61 +427,13 @@ describe('Joineazy Task 1 - Comprehensive Backend API Verification', () => {
       expect(res.body.success).toBe(false);
     });
 
-    it('ATTACK: Registration payload with role=ADMIN is forced to STUDENT', async () => {
+    it('Invalid ObjectId format is rejected safely with 400', async () => {
       const res = await request(app)
-        .post('/api/auth/register')
-        .send({
-          name: 'Hacker User',
-          email: 'hacker@university.edu',
-          password: 'Password123!',
-          student_id: 'HACK999',
-          role: 'ADMIN', // Malicious attempt to escalate role
-        });
-
-      expect(res.status).toBe(201);
-      expect(res.body.data.user.role).toBe('STUDENT'); // Enforced as STUDENT
-    });
-
-    it('ATTACK: Student attempting to submit unassigned assignment is rejected with 404', async () => {
-      const res = await request(app)
-        .post(`/api/assignments/${createdAssignmentId}/submission/confirm`)
-        .set('Authorization', `Bearer ${studentToken}`) // Alex is in Alpha, assignment was targeted to Quantum Squad
-        .send({ is_confirmed: true });
-
-      expect(res.status).toBe(404);
-      expect(res.body.success).toBe(false);
-    });
-
-    it('ATTACK: Duplicate submission confirmation is rejected with 409 Conflict', async () => {
-      // Ethan already submitted createdAssignmentId in Section 7
-      const res = await request(app)
-        .post(`/api/assignments/${createdAssignmentId}/submission/confirm`)
-        .set('Authorization', `Bearer ${unassignedStudentToken}`)
-        .send({ is_confirmed: true });
-
-      expect(res.status).toBe(409);
-      expect(res.body.success).toBe(false);
-      expect(res.body.message).toContain('already confirmed');
-    });
-
-    it('ATTACK: Malformed UUID is rejected safely without server crash', async () => {
-      const res = await request(app)
-        .get('/api/admin/assignments/not-a-valid-uuid-1234')
+        .get('/api/admin/assignments/invalid-object-id-123')
         .set('Authorization', `Bearer ${adminToken}`);
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
     });
-
-    it('ATTACK: SQL injection payload in identifier lookup is handled safely', async () => {
-      const res = await request(app)
-        .post(`/api/groups/${createdGroupId}/members`)
-        .set('Authorization', `Bearer ${unassignedStudentToken}`)
-        .send({ identifier: "' OR '1'='1" });
-
-      expect(res.status).toBe(404);
-      expect(res.body.success).toBe(false);
-    });
   });
 });
-

@@ -228,7 +228,7 @@ export default function AssignmentDetailsAuditPage() {
               <span>Student Confirmation Logs</span>
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Verified submission logs stored in PostgreSQL
+              Verified submission logs stored in MongoDB
             </p>
           </div>
 

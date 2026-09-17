@@ -10,35 +10,41 @@ const errorHandler = (err, req, res, next) => {
   let message = err.message || 'Internal Server Error';
   let errors = err.errors || null;
 
-  // Handle PostgreSQL known error codes
-  if (err.code === '23505') { // Unique constraint violation
+  // Handle Mongoose CastError (e.g. invalid ObjectId format)
+  if (err.name === 'CastError') {
+    statusCode = 400;
+    message = `Invalid identifier format: ${err.value}`;
+  }
+  // Handle MongoDB Duplicate Key Error (E11000)
+  else if (err.code === 11000) {
     statusCode = 409;
-    if (err.constraint && err.constraint.includes('email')) {
-      message = 'An account with this email already exists.';
-    } else if (err.constraint && err.constraint.includes('student_id')) {
+    const field = Object.keys(err.keyPattern || {})[0] || '';
+    if (field === 'email') {
+      message = 'An account with this email address already exists.';
+    } else if (field === 'student_id') {
       message = 'A student with this Student ID is already registered.';
-    } else if (err.constraint && err.constraint.includes('group_members_user')) {
+    } else if (field === 'user_id') {
       message = 'This student is already a member of an active group.';
-    } else if (err.constraint && err.constraint.includes('groups_name')) {
-      message = 'A group with this name already exists.';
-    } else if (err.constraint && err.constraint.includes('submissions_assignment_student')) {
+    } else if (field === 'name') {
+      message = 'A group with this name already exists. Please choose a different name.';
+    } else if (field === 'assignment_id') {
       message = 'You have already confirmed submission for this assignment.';
     } else {
       message = 'A duplicate record conflict occurred.';
     }
-  } else if (err.code === '23503') { // Foreign key violation
+  }
+  // Handle Mongoose ValidationError
+  else if (err.name === 'ValidationError') {
     statusCode = 400;
-    message = 'Referenced record was not found.';
-  } else if (
-    err.code === '22P02' ||
-    err.message?.includes('cannot cast type text to uuid') ||
-    err.message?.includes('invalid input syntax for type uuid') ||
-    err.data?.error?.includes('cannot cast type text to uuid')
-  ) { // Invalid text representation / UUID format
-    statusCode = 400;
-    message = 'Invalid identifier format.';
-  } else if (err.name === 'JsonWebTokenError') {
-
+    const errorDetails = Object.values(err.errors || {}).map((e) => ({
+      field: e.path,
+      message: e.message,
+    }));
+    message = errorDetails.map((e) => e.message).join(', ') || 'Validation error';
+    errors = errorDetails;
+  }
+  // Handle JWT errors
+  else if (err.name === 'JsonWebTokenError') {
     statusCode = 401;
     message = 'Invalid authentication token. Please log in again.';
   } else if (err.name === 'TokenExpiredError') {

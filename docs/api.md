@@ -1,4 +1,4 @@
-# REST API Specification
+# REST API Specification (MERN Stack)
 
 All backend endpoints are prefixed with `/api` and return standardized JSON responses.
 
@@ -26,6 +26,21 @@ All backend endpoints are prefixed with `/api` and return standardized JSON resp
 
 ---
 
+## 🏥 Health Check (`GET /api/health`)
+- **Access**: Public
+- **Success (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Joineazy API is running",
+  "database": "connected",
+  "timestamp": "2026-09-17T10:00:00.000Z",
+  "environment": "production"
+}
+```
+
+---
+
 ## 🔐 1. Authentication Endpoints (`/api/auth`)
 
 ### `POST /api/auth/register`
@@ -47,7 +62,7 @@ All backend endpoints are prefixed with `/api` and return standardized JSON resp
   "data": {
     "token": "eyJhbGciOi...",
     "user": {
-      "id": "c0000000-0000-0000-0000-000000000001",
+      "id": "65f0a1b2c3d4e5f6a7b8c901",
       "name": "Jane Doe",
       "email": "jane@student.edu",
       "role": "STUDENT",
@@ -67,96 +82,100 @@ All backend endpoints are prefixed with `/api` and return standardized JSON resp
   "password": "Password123!"
 }
 ```
-- **Success (200 OK)**: Returns JWT token and user profile with group context.
+- **Success (200 OK)**:
+```json
+{
+  "success": true,
+  "data": {
+    "token": "eyJhbGciOi...",
+    "user": {
+      "id": "65f0a1b2c3d4e5f6a7b8c902",
+      "name": "Alex Johnson",
+      "email": "alex@student.edu",
+      "role": "STUDENT",
+      "student_id": "STU1001",
+      "group": {
+        "id": "65f0a1b2c3d4e5f6a7b8c910",
+        "name": "Cloud Architects Alpha",
+        "is_creator": true
+      }
+    }
+  }
+}
+```
 
 ### `GET /api/auth/me`
-- **Access**: Authenticated (Bearer Token)
-- **Description**: Retrieves current user's profile and active group membership.
+- **Access**: Authenticated (`STUDENT` or `ADMIN`)
+- **Headers**: `Authorization: Bearer <token>`
+- **Success (200 OK)**: Current user profile with active group data.
 
 ---
 
 ## 👥 2. Group Management Endpoints (`/api/groups`)
 
 ### `POST /api/groups`
-- **Access**: Student
-- **Description**: Creates a new group. Creator automatically becomes the leader.
-- **Request Body**: `{ "name": "Team Nova" }`
-- **Conflict (409)**: If the student is already in a group or group name exists.
+- **Access**: Authenticated `STUDENT`
+- **Description**: Creates a new group and assigns the creator as first member. Student cannot already belong to a group.
+- **Request Body**: `{ "name": "Quantum Computing Squad" }`
 
 ### `GET /api/groups/my`
-- **Access**: Student
-- **Description**: Returns current student's group details and full member roster.
+- **Access**: Authenticated `STUDENT`
+- **Description**: Returns current student's group, creator status, and member roster.
 
 ### `POST /api/groups/:id/members`
-- **Access**: Student (Group Member)
-- **Description**: Adds a peer student to the group via email or student ID.
+- **Access**: Authenticated Group Member
+- **Description**: Invites/adds student by email or Student ID (`STUxxxx`). Candidate must not already belong to another group.
 - **Request Body**: `{ "identifier": "STU1005" }`
 
 ### `DELETE /api/groups/:id/members/:userId`
-- **Access**: Student (Group Leader or Self)
-- **Description**: Removes student from group.
+- **Access**: Group Creator (any member) OR Self-removal (leaving group)
+- **Description**: Removes member or allows student to leave group.
 
 ---
 
-## 📚 3. Assignment & Submission Endpoints
+## 📚 3. Assignment Endpoints (`/api/assignments`)
 
-### `GET /api/assignments/my`
-- **Access**: Student
-- **Description**: Retrieves coursework visible to the student (targeted globally or to their active group).
+### `GET /api/assignments`
+- **Access**: Authenticated `STUDENT`
+- **Description**: Returns assignments visible to student (`ALL` or targeted to student's group) with submission status (`CONFIRMED` / `PENDING`).
 
-### `POST /api/submissions`
-- **Access**: Student
-- **Description**: Confirms completion of an assignment using two-step verification.
-- **Request Body**:
-```json
-{
-  "assignment_id": "a0000000-0000-0000-0000-000000000001",
-  "is_confirmed": true
-}
-```
+### `GET /api/assignments/:id`
+- **Access**: Authenticated `STUDENT`
+- **Description**: Returns single assignment details and student submission state.
+
+### `POST /api/assignments/:id/submission/confirm`
+- **Access**: Authenticated `STUDENT`
+- **Description**: Two-step submission confirmation. Requires step-1 agreement.
+- **Request Body**: `{ "is_confirmed": true }`
 
 ---
 
-## 👨‍🏫 4. Admin & Professor Endpoints (`/api/admin`)
-
-*Note: All endpoints require an `ADMIN` role JWT. Students receive HTTP 403 Forbidden.*
+## 👨‍🏫 4. Admin Endpoints (`/api/admin`)
+*(Protected by `authorize('ADMIN')` — returns 403 Forbidden to students)*
 
 ### `GET /api/admin/assignments`
-- **Access**: Admin
-- **Description**: Returns all assignments with target types, due dates, submission counts, and completion rates.
+- Lists all assignments, target types, and confirmed submission counts.
 
 ### `POST /api/admin/assignments`
-- **Access**: Admin
-- **Description**: Creates assignment with title, description, due date, OneDrive URL, and target configuration (`ALL_STUDENTS` or `SPECIFIC_GROUPS` with `group_ids`).
-
-### `GET /api/admin/assignments/:id`
-- **Access**: Admin
-- **Description**: Retrieves assignment details and target group IDs.
+- Creates new coursework assignment with `ALL` or `GROUPS` targeting.
 
 ### `PUT /api/admin/assignments/:id`
-- **Access**: Admin
-- **Description**: Updates assignment details and targets.
+- Updates assignment title, description, due date, OneDrive link, or group targets.
 
 ### `DELETE /api/admin/assignments/:id`
-- **Access**: Admin
-- **Description**: Deletes assignment.
+- Deletes assignment, target records, and submission confirmations.
 
 ### `GET /api/admin/assignments/:id/submissions`
-- **Access**: Admin
-- **Description**: Audit matrix of all targeted students and confirmation status.
+- Returns full submission audit matrix (group summary + individual student statuses).
 
-### `GET /api/admin/groups/:id/audit`
-- **Access**: Admin
-- **Description**: Deep group audit with member-by-member assignment confirmation tree.
+### `GET /api/admin/groups` & `GET /api/admin/groups/:id`
+- Cohort inspection and member-by-member assignment audit tree.
 
 ### `GET /api/admin/analytics/overview`
-- **Access**: Admin
-- **Description**: Summary KPIs (Total students, groups, assignments, submissions, completion rate).
+- Executive KPI cards data (Total Students, Groups, Assignments, Completed, Rate).
 
 ### `GET /api/admin/analytics/groups`
-- **Access**: Admin
-- **Description**: Group cohort performance comparison data.
+- Group-by-group performance distribution array.
 
 ### `GET /api/admin/analytics/students`
-- **Access**: Admin
-- **Description**: Per-student submission metrics and completion percentages.
+- Student-by-student completion matrix with calculated percentages.

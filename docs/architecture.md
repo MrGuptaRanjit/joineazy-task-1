@@ -1,6 +1,6 @@
-# System Architecture
+# System Architecture (MERN Stack)
 
-The **Joineazy Student, Group & Assignment Management System** is structured as a layered, role-based full-stack architecture adhering to separation of concerns, strict boundary verification, and atomic transactional integrity.
+The **Joineazy Student, Group & Assignment Management System** is structured as a layered, role-based **MERN Stack** (MongoDB, Express.js, React + Vite, Node.js) architecture adhering to separation of concerns, strict boundary verification, and database-enforced integrity.
 
 ---
 
@@ -16,8 +16,8 @@ graph TD
     Validator[Express-Validator Middleware]
     Controller[HTTP Controllers]
     Service[Domain Services / Business Logic]
-    Repository[SQL Data Access Repositories]
-    Postgres[(PostgreSQL 15 Database)]
+    Repository[Mongoose Data Access Repositories]
+    MongoDB[(MongoDB Atlas / Mongoose 8)]
 
     Client --> Router
     Router --> ServiceLayer
@@ -27,7 +27,7 @@ graph TD
     Validator --> Controller
     Controller --> Service
     Service --> Repository
-    Repository -->|pg Connection Pool| Postgres
+    Repository -->|Mongoose Connection Pool| MongoDB
 ```
 
 ---
@@ -46,7 +46,7 @@ graph TD
 
 ### 3. IDOR & Resource Ownership Protections
 - **Group Modification**: Only active members of a group can invite new peers.
-- **Group Removal**: Only the group creator can remove other members; individual members can only remove themselves (leave). Group creators cannot leave while other members remain without transferring or disbanding.
+- **Group Removal**: Only the group creator can remove other members; individual members can only remove themselves (leave).
 - **Submissions**: Submissions are tied to the authenticated user ID (`req.user.id`). Students can only confirm assignments explicitly visible to them.
 
 ---
@@ -55,10 +55,10 @@ graph TD
 
 | Layer | Responsibility | File Path Reference |
 | :--- | :--- | :--- |
-| **Presentation (UI)** | Responsive components, visual state machines (loading, empty, error, success), interactive Recharts. | `frontend/src/pages/`, `frontend/src/components/` |
+| **Presentation (UI)** | Responsive components, visual state machines, interactive Recharts. | `frontend/src/pages/`, `frontend/src/components/` |
 | **Client Services** | Centralized Axios HTTP abstractions, token management, error unwrap. | `frontend/src/services/` |
-| **Routing & Middleware** | HTTP route mapping, rate limiting/CORS, JWT extraction, validation error interceptors. | `backend/src/routes/`, `backend/src/middleware/` |
-| **Controllers** | Request payload unmarshaling, calling domain services, dispatching standard JSON envelopes. | `backend/src/controllers/` |
-| **Domain Services** | Business rules enforcement, workflow orchestration, access control logic. | `backend/src/services/` |
-| **Repositories** | Direct parameterized SQL statements, connection pooling, transactional isolation. | `backend/src/repositories/` |
-| **Persistence (DB)** | PostgreSQL schema, relational integrity, unique constraints, check constraints. | `backend/src/db/schema.sql` |
+| **Routing & Middleware** | HTTP route mapping, CORS, JWT extraction, validation interceptors. | `backend/src/routes/`, `backend/src/middleware/` |
+| **Controllers** | Request unpacking, HTTP status code management, response formatting. | `backend/src/controllers/` |
+| **Domain Services** | Business logic, permissions, workflow orchestration. | `backend/src/services/` |
+| **Data Repositories** | Mongoose schema queries, compound indexing, aggregation pipelines. | `backend/src/repositories/` |
+| **Database** | Document persistence, schema validation, unique indexes. | `MongoDB Atlas` |

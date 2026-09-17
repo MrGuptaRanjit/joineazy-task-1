@@ -1,6 +1,7 @@
 const { body, param } = require('express-validator');
+const mongoose = require('mongoose');
 
-const uuidRegex = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const isValidObjectId = (val) => mongoose.Types.ObjectId.isValid(val);
 
 const createAssignmentValidator = [
   body('title')
@@ -22,15 +23,15 @@ const createAssignmentValidator = [
     .isIn(['ALL', 'GROUPS']).withMessage("target_type must be either 'ALL' or 'GROUPS'"),
   body('group_ids')
     .optional()
-    .isArray().withMessage('group_ids must be an array of group UUIDs'),
+    .isArray().withMessage('group_ids must be an array of group IDs'),
   body('group_ids.*')
     .optional()
-    .matches(uuidRegex).withMessage('Each group_id must be a valid UUID'),
+    .custom((val) => isValidObjectId(val)).withMessage('Each group_id must be a valid ObjectId'),
 ];
 
 const updateAssignmentValidator = [
   param('id')
-    .matches(uuidRegex).withMessage('Invalid assignment ID format'),
+    .custom((val) => isValidObjectId(val)).withMessage('Invalid assignment ID format'),
   body('title')
     .optional()
     .trim()
@@ -50,12 +51,15 @@ const updateAssignmentValidator = [
     .isIn(['ALL', 'GROUPS']).withMessage("target_type must be either 'ALL' or 'GROUPS'"),
   body('group_ids')
     .optional()
-    .isArray().withMessage('group_ids must be an array of group UUIDs'),
+    .isArray().withMessage('group_ids must be an array of group IDs'),
+  body('group_ids.*')
+    .optional()
+    .custom((val) => isValidObjectId(val)).withMessage('Each group_id must be a valid ObjectId'),
 ];
 
 const confirmSubmissionValidator = [
   param('id')
-    .matches(uuidRegex).withMessage('Invalid assignment ID format'),
+    .custom((val) => isValidObjectId(val)).withMessage('Invalid assignment ID format'),
   body('is_confirmed')
     .isBoolean().withMessage('is_confirmed must be a boolean (true) indicating step 1 acknowledgment')
     .custom((val) => val === true).withMessage('You must confirm that you have submitted before submitting'),

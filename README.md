@@ -1,10 +1,10 @@
 # Student, Group & Assignment Management System (Joineazy Task 1)
 
-A production-grade, role-based full-stack web application designed for academic cohorts. It empowers students to collaborate in groups, access coursework materials and OneDrive submission links, verify completion with a two-step confirmation flow, and track team progress. It provides professors and administrators with assignment targeting capabilities, real-time submission auditing, group monitoring, and executive analytics.
+A production-grade, role-based **MERN Stack** (MongoDB, Express.js, React + Vite, Node.js) web application designed for academic cohorts. It empowers students to collaborate in groups, access coursework materials and OneDrive submission links, verify completion with a two-step confirmation flow, and track team progress. It provides professors and administrators with assignment targeting capabilities, real-time submission auditing, group monitoring, and executive analytics.
 
 ---
 
-## 📺 Project Demonstration
+## 📺 Project Demonstration & Repository
 
 - **GitHub Repository**: [https://github.com/MrGuptaRanjit/joineazy-task-1](https://github.com/MrGuptaRanjit/joineazy-task-1)
 - **Demo Walkthrough Video**: `[ADD VIDEO LINK]`
@@ -66,10 +66,10 @@ A production-grade, role-based full-stack web application designed for academic 
 
 | Layer | Technology | Purpose |
 | :--- | :--- | :--- |
-| **Frontend** | React 18, React Router v6, Tailwind CSS, Lucide React, Recharts, Axios | Single-Page Application with responsive design, charts, and client-side RBAC guards |
+| **Frontend** | React 18, Vite, React Router v6, Tailwind CSS, Lucide React, Recharts, Axios | Responsive Single-Page Application with interactive charts and client-side RBAC guards |
 | **Backend** | Node.js, Express.js, `express-validator`, `bcryptjs`, `jsonwebtoken` | Layered REST API (Controllers, Services, Repositories) |
-| **Database** | PostgreSQL 15, `pg` (node-postgres connection pooling) | Relational database with UUIDs, foreign keys, unique constraints, and aggregate queries |
-| **Containerization** | Docker, Docker Compose | Multi-container orchestration (Postgres, Backend, Frontend) |
+| **Database** | MongoDB, Mongoose 8 | Document database with schema validation, compound indexes, ObjectId references, and aggregation pipelines |
+| **Cloud Hosting** | Render (Backend), MongoDB Atlas (Database), Vercel / Netlify (Frontend) | Free-tier cloud infrastructure |
 
 ---
 
@@ -85,8 +85,8 @@ graph TD
     Validator[Express-Validator Middleware]
     Controller[HTTP Controllers]
     Service[Domain Services / Business Logic]
-    Repository[SQL Data Access Repositories]
-    Postgres[(PostgreSQL 15 Database)]
+    Repository[Mongoose Data Access Repositories]
+    MongoDB[(MongoDB Atlas / Mongoose 8)]
 
     Client --> Router
     Router --> ServiceLayer
@@ -96,154 +96,77 @@ graph TD
     Validator --> Controller
     Controller --> Service
     Service --> Repository
-    Repository -->|pg Connection Pool| Postgres
+    Repository -->|Mongoose Connection Pool| MongoDB
 ```
 
 ---
 
-## 🗄 Database Design & Entity Relationships
+## 🗄 Database Design & Schema Relationships
 
 ```mermaid
 erDiagram
-    USERS ||--o{ GROUPS : "creates"
-    USERS ||--o| GROUP_MEMBERS : "belongs to (UNIQUE user_id)"
-    GROUPS ||--o{ GROUP_MEMBERS : "contains"
-    USERS ||--o{ ASSIGNMENTS : "creates (admin)"
-    ASSIGNMENTS ||--o{ ASSIGNMENT_TARGETS : "targets"
-    GROUPS ||--o{ ASSIGNMENT_TARGETS : "targeted by"
-    USERS ||--o{ SUBMISSIONS : "confirms"
-    ASSIGNMENTS ||--o{ SUBMISSIONS : "records"
+    User ||--o{ Group : "created_by"
+    User ||--o| GroupMember : "user_id (UNIQUE)"
+    Group ||--o{ GroupMember : "group_id"
+    User ||--o{ Assignment : "created_by"
+    Assignment ||--o{ AssignmentTarget : "assignment_id"
+    Group ||--o{ AssignmentTarget : "group_id"
+    User ||--o{ Submission : "student_id (UNIQUE with assignment_id)"
+    Assignment ||--o{ Submission : "assignment_id"
 
-    USERS {
-        uuid id PK
-        varchar email UK
-        varchar password_hash
-        varchar name
-        varchar role "STUDENT | ADMIN"
-        varchar student_id UK
-        timestamp created_at
-        timestamp updated_at
+    User {
+        ObjectId _id PK
+        String name
+        String email UK
+        String password_hash
+        String role "STUDENT | ADMIN"
+        String student_id "Sparse UK"
+        Date created_at
+        Date updated_at
     }
 
-    GROUPS {
-        uuid id PK
-        varchar name UK
-        uuid created_by FK
-        timestamp created_at
-        timestamp updated_at
+    Group {
+        ObjectId _id PK
+        String name UK
+        ObjectId created_by FK
+        Date created_at
+        Date updated_at
     }
 
-    GROUP_MEMBERS {
-        uuid id PK
-        uuid group_id FK
-        uuid user_id FK, UK
-        timestamp joined_at
+    GroupMember {
+        ObjectId _id PK
+        ObjectId group_id FK
+        ObjectId user_id FK, UK
+        Date joined_at
     }
 
-    ASSIGNMENTS {
-        uuid id PK
-        varchar title
-        text description
-        timestamp due_date
-        varchar onedrive_url
-        varchar target_type "ALL_STUDENTS | SPECIFIC_GROUPS"
-        uuid created_by FK
-        timestamp created_at
-        timestamp updated_at
+    Assignment {
+        ObjectId _id PK
+        String title
+        String description
+        Date due_date
+        String onedrive_link
+        String target_type "ALL | GROUPS"
+        ObjectId created_by FK
+        Date created_at
+        Date updated_at
     }
 
-    ASSIGNMENT_TARGETS {
-        uuid id PK
-        uuid assignment_id FK
-        uuid group_id FK
-        timestamp created_at
+    AssignmentTarget {
+        ObjectId _id PK
+        ObjectId assignment_id FK
+        ObjectId group_id FK
+        Date created_at
     }
 
-    SUBMISSIONS {
-        uuid id PK
-        uuid assignment_id FK
-        uuid user_id FK
-        boolean is_confirmed
-        timestamp confirmed_at
-        timestamp created_at
-        timestamp updated_at
+    Submission {
+        ObjectId _id PK
+        ObjectId assignment_id FK
+        ObjectId student_id FK
+        ObjectId group_id FK
+        String status "CONFIRMED | PENDING"
+        Date confirmed_at
     }
-```
-
----
-
-## 📸 Recommended Screenshots for Submission
-
-1. **Login & Registration**: Split-screen auth with validation errors and role redirection.
-2. **Student Dashboard**: Live KPI cards, upcoming deadlines, and progress shortcut.
-3. **Group Collaboration Hub**: Member roster, leader badge, and student invitation modal.
-4. **Coursework Browser**: Assignment list with OneDrive folder action and status filters.
-5. **Two-Step Submission Modal**: Certification checkbox dialog before final submission confirmation.
-6. **Student Progress & Milestones**: Progress bar, milestone badges, and completion breakdown.
-7. **Admin Dashboard**: Executive KPI cards, recent tasks, and low-completion cohort alerts.
-8. **Create Targeted Assignment**: Group selector and due date configuration form.
-9. **Assignment Audit Matrix**: Student-by-student confirmation table with confirmed timestamps.
-10. **Executive Analytics**: Recharts completion rate bar charts and submission distribution doughnut chart.
-
----
-
-## 📂 Project Structure
-
-```
-joineazy-task-1/
-├── backend/
-│   ├── src/
-│   │   ├── config/              # Centralized environment config (index.js)
-│   │   ├── controllers/         # Express controllers (auth, group, assignment, admin)
-│   │   ├── db/                  # PostgreSQL pool & authoritative schema
-│   │   │   ├── index.js         # PostgreSQL connection pool (pg)
-│   │   │   ├── migrate.js       # Migration runner
-│   │   │   ├── schema.sql       # Single authoritative DDL schema definition
-│   │   │   ├── seed.js          # Dynamic seed runner with bcrypt
-│   │   │   └── seed.sql         # Seed records
-│   │   ├── middleware/          # authenticate, authorize, errorHandler, validate
-│   │   ├── repositories/        # SQL data access layers (user, group, assignment, submission, analytics)
-│   │   ├── routes/              # Express REST routes (auth, group, assignment, submission, admin)
-│   │   ├── services/            # Business logic layer
-│   │   ├── utils/               # AppError, JWT, bcrypt password, response formatter
-│   │   ├── validators/          # express-validator schemas
-│   │   ├── app.js               # Express app instance & middleware mounting
-│   │   └── server.js            # Server entrypoint with DB retry backoff
-│   ├── tests/
-│   │   ├── api.test.js          # Complete integration test suite (27 tests)
-│   │   └── testDb.js            # In-memory test database harness
-│   ├── Dockerfile
-│   └── package.json
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   └── ui/              # Reusable UI library (Button, Card, Badge, Modal, ProgressBar, Input, EmptyState, LoadingSpinner, ErrorAlert)
-│   │   ├── context/             # AuthContext, ToastContext
-│   │   ├── hooks/               # useAuth, useToast
-│   │   ├── layouts/             # StudentLayout, AdminLayout, AuthLayout
-│   │   ├── pages/
-│   │   │   ├── admin/           # AdminDashboard, AdminAssignmentsPage, CreateAssignmentPage, EditAssignmentPage, AssignmentDetailsAuditPage, AdminGroupsPage, AdminGroupDetailsPage, AdminAnalyticsPage
-│   │   │   ├── auth/            # LoginPage, RegisterPage
-│   │   │   └── student/         # StudentDashboard, StudentGroupPage, StudentAssignmentsPage, StudentAssignmentDetailsPage, StudentProgressPage
-│   │   ├── routes/              # ProtectedRoute, PublicRoute, AppRoutes
-│   │   ├── services/            # Centralized API service clients (auth, group, assignment, submission, admin)
-│   │   ├── utils/               # Date & formatting utilities
-│   │   ├── App.jsx              # Main React Application
-│   │   ├── index.css            # Tailwind directives & design tokens
-│   │   └── main.jsx             # React DOM entry
-│   ├── Dockerfile
-│   ├── package.json
-│   └── vite.config.js
-├── docs/
-│   ├── architecture.md          # Architectural deep-dive & security layers
-│   ├── database.md              # Database schema, indexes & constraints
-│   ├── api.md                   # Complete REST API specifications & payloads
-│   ├── demo-script.md           # 5-8 minute structured video demo script
-│   └── interview-notes.md       # 19 technical interview answers & tradeoffs
-├── docker-compose.yml
-├── .env.example
-├── .gitignore
-└── README.md
 ```
 
 ---
@@ -258,111 +181,125 @@ joineazy-task-1/
 | **Student** | Alex Johnson | `alex@student.edu` | `Password123!` | STU1001 (Cloud Architects Alpha) |
 | **Student** | Brianna Smith | `brianna@student.edu` | `Password123!` | STU1002 (Cloud Architects Alpha) |
 | **Student** | Carlos Mendez | `carlos@student.edu` | `Password123!` | STU1003 (Distributed Systems Beta) |
-| **Student** | Diana Prince | `diana@student.edu` | `Password123!` | STU1004 (Distributed Systems Beta) |
-| **Student** | Ethan Hunt | `ethan@student.edu` | `Password123!` | STU1005 (No Group - Ready to create) |
+| **Student** | Diana Prince | `diana@student.edu` | `Password123!` | STU1004 (Cloud Architects Alpha) |
+| **Student** | Ethan Hunt | `ethan@student.edu` | `Password123!` | STU1005 (Distributed Systems Beta) |
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Local Setup Instructions
 
-### Option 1: Run with Docker Compose (Recommended)
+### Prerequisites
+- **Node.js**: `>= 18.0.0`
+- **npm**: `>= 9.0.0`
+- **MongoDB**: Local MongoDB instance (`mongodb://127.0.0.1:27017`) or MongoDB Atlas Free Tier connection string.
 
-1. **Clone the repository**:
-   ```bash
-   git clone [ADD GITHUB LINK]
-   cd joineazy-task-1
-   ```
+### 1. Clone & Configure
+```bash
+git clone https://github.com/MrGuptaRanjit/joineazy-task-1.git
+cd joineazy-task-1
+```
 
-2. **Start all services**:
-   ```bash
-   docker compose up --build
-   ```
-
-3. **Access the application**:
-   - **Frontend**: [http://localhost:3000](http://localhost:3000)
-   - **Backend API**: [http://localhost:5000/api](http://localhost:5000/api)
-   - **Health Check**: [http://localhost:5000/api/health](http://localhost:5000/api/health)
-   - **PostgreSQL**: `localhost:5432`
-
----
-
-### Option 2: Run Locally (Bare Metal)
-
-#### Prerequisites:
-- Node.js >= 18.0.0
-- PostgreSQL >= 14.0
-- npm >= 9.0.0
-
-#### 1. Backend Setup:
+### 2. Backend Setup
 ```bash
 cd backend
 npm install
-cp ../.env.example .env
-npm run db:migrate
-npm run db:seed
-npm run dev
+cp .env.example .env
+```
+Ensure your `backend/.env` contains:
+```env
+PORT=5000
+NODE_ENV=development
+MONGODB_URI=mongodb://127.0.0.1:27017/joineazy
+JWT_SECRET=super_secret_jwt_key_please_change_in_production_32_chars_min
+JWT_EXPIRES_IN=24h
+CORS_ORIGIN=http://localhost:5173
 ```
 
-#### 2. Frontend Setup:
+Seed demo test accounts and assignments:
+```bash
+npm run db:seed
+```
+
+Start the backend development server:
+```bash
+npm run dev
+# Or for production:
+npm start
+```
+
+### 3. Frontend Setup
+In a new terminal window:
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
 
+Open [http://localhost:5173](http://localhost:5173) in your browser!
+
 ---
 
-## 🧪 Automated Testing
+## 🧪 Automated Testing & Production Build
 
-Execute the automated backend integration test suite:
-
+### 1. Run Backend Automated Test Suite
 ```bash
 cd backend
 npm test
 ```
+**Results:** `32 passed, 32 total` covering Health check, Student registration & validation, Login flow, JWT RBAC, Group management, Single-group constraint, Assignment targeting, Two-step confirmation, Admin analytics, and Input security.
 
-### Test Suite Output:
-```
-PASS tests/api.test.js
-  Joineazy Task 1 - Comprehensive Backend API Verification
-    √ 1. Health Check Endpoint (14 ms)
-    √ 2. Student Registration & Validation (143 ms)
-    √ 3. Login Flow & Credentials Handling (272 ms)
-    √ 4. JWT Authentication & Role-Based Authorization (RBAC) (92 ms)
-    √ 5. Group Management & Single-Group Constraint (110 ms)
-    √ 6. Assignment Management & Targeting (88 ms)
-    √ 7. Two-Step Submission Confirmation Flow (85 ms)
-    √ 8. Admin Analytics Engine (146 ms)
-    √ 9. Adversarial Security, IDOR & Input Attack Vectors (182 ms)
-
-Test Suites: 1 passed, 1 total
-Tests:       36 passed, 36 total
-Time:        2.929 s
-```
-
-
-Frontend production build check:
+### 2. Run Frontend Production Build
 ```bash
 cd frontend
 npm run build
 ```
-```
-✓ 2402 modules transformed.
-✓ built in 5.92s with 0 errors.
-```
+**Results:** Built cleanly in `<7s` with zero errors.
 
 ---
 
-## ⚖️ Engineering Tradeoffs & Design Decisions
+## ☁️ Free-Tier Cloud Deployment Guide
 
-1. **Stateless JWT vs Server Sessions**: Stateless tokens minimize server memory requirements and scale horizontally across instances without requiring shared session caching.
-2. **Database-Level Relational Constraints**: The single-group constraint (`UNIQUE(user_id)`) and duplicate submission prevention (`UNIQUE(assignment_id, user_id)`) are enforced directly in PostgreSQL schema, ensuring complete data consistency even if frontend checks are bypassed.
-3. **Two-Step Submission Flow**: Coursework submissions open external OneDrive links, requiring students to explicitly certify submission before recording confirmation timestamps.
-4. **Calculated Aggregations in SQL**: Analytics endpoints calculate classroom completion rates, group performance, and status distribution inside PostgreSQL using `COUNT`, `CASE WHEN`, and `COALESCE`, avoiding unnecessary data transfers to the client.
+### 1. Database: MongoDB Atlas (Free M0 Tier)
+1. Create a free account at [mongodb.com/atlas](https://www.mongodb.com/atlas).
+2. Create an **M0 Free Cluster**.
+3. Under **Database Access**, create a user (e.g. `joineazy_user` with a password).
+4. Under **Network Access**, allow access from anywhere (`0.0.0.0/0`).
+5. Click **Connect** $\rightarrow$ **Drivers** $\rightarrow$ Copy the connection string:
+   `mongodb+srv://<username>:<password>@cluster0.mongodb.net/joineazy?retryWrites=true&w=majority`
+
+### 2. Backend: Render Free Web Service
+1. Go to [dashboard.render.com](https://dashboard.render.com) and click **New +** $\rightarrow$ **Web Service**.
+2. Select your repository: `MrGuptaRanjit/joineazy-task-1`.
+3. Configure:
+   - **Root Directory**: `backend`
+   - **Runtime**: `Node`
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
+   - **Environment Variables**:
+     - `NODE_ENV`: `production`
+     - `PORT`: `5000`
+     - `JWT_SECRET`: *(Any random 32+ character string)*
+     - `JWT_EXPIRES_IN`: `24h`
+     - `MONGODB_URI`: *(Your MongoDB Atlas connection string)*
+     - `CORS_ORIGIN`: `*` (or your deployed Vercel frontend URL)
+4. Click **Deploy Web Service**.
+5. Once deployed, run `npm run db:seed` locally against your Atlas URI or trigger seeding to populate initial demo accounts.
+
+### 3. Frontend: Vercel / Netlify
+1. Go to [vercel.com](https://vercel.com) and click **Add New...** $\rightarrow$ **Project**.
+2. Import `MrGuptaRanjit/joineazy-task-1`.
+3. Configure:
+   - **Framework Preset**: `Vite`
+   - **Root Directory**: `frontend`
+   - **Environment Variables**:
+     - `VITE_API_BASE_URL`: `https://<YOUR-RENDER-BACKEND-URL>/api`
+4. Click **Deploy**.
 
 ---
 
-## ⚠️ Known Limitations
+## ⚖️ Engineering Decisions & MERN Architecture Benefits
 
-1. **External Folder Link**: Assignment submissions record a two-step confirmation for coursework submitted to an external OneDrive folder rather than hosting direct binary file uploads on the application server.
-2. **Group Leadership Transfer**: When a group creator leaves, other members must either be removed or the group disbanded before the creator departs. Automatic leader transfer election is a future enhancement.
+1. **Document Embedding & Normalization**: Groups, members, assignments, and submissions use Mongoose ObjectId references to preserve relational integrity with flexible JSON projections.
+2. **Database-Level Unique Indexes**: The single-group constraint (`GroupMember.user_id` unique index) and duplicate submission prevention (`Submission` compound `{ assignment_id: 1, student_id: 1 }` unique index) guarantee data integrity at the database layer.
+3. **Stateless JWT with RBAC**: Stateless JWT tokens enable horizontal scaling without shared session memory, while strict RBAC middleware protects admin endpoints with HTTP 403 enforcement.
+4. **Resilient Local Development**: The backend automatically falls back to an embedded in-memory MongoDB engine (`MongoMemoryServer`) during tests or local offline development, allowing zero-friction onboarding.

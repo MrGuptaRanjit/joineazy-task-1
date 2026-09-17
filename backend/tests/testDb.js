@@ -1,95 +1,160 @@
-const { newDb } = require('pg-mem');
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
+const mongoose = require('mongoose');
+const { MongoMemoryServer } = require('mongodb-memory-server');
 const { hashPassword } = require('../src/utils/password.util');
+const {
+  User,
+  Group,
+  GroupMember,
+  Assignment,
+  AssignmentTarget,
+  Submission,
+} = require('../src/models');
+
+let mongod = null;
 
 const setupTestDb = async () => {
-  const mem = newDb();
+  if (!mongod) {
+    mongod = await MongoMemoryServer.create();
+    const uri = mongod.getUri();
+    if (mongoose.connection.readyState === 0) {
+      await mongoose.connect(uri);
+    }
+  }
 
-  // Register uuid & string functions as impure (non-deterministic)
-  mem.public.registerFunction({
-    name: 'gen_random_uuid',
-    impure: true,
-    implementation: () => crypto.randomUUID(),
-  });
+  // Clear all collections
+  await Promise.all([
+    User.deleteMany({}),
+    Group.deleteMany({}),
+    GroupMember.deleteMany({}),
+    Assignment.deleteMany({}),
+    AssignmentTarget.deleteMany({}),
+    Submission.deleteMany({}),
+  ]);
 
-  mem.public.registerFunction({
-    name: 'trim',
-    args: ['text'],
-    returns: 'text',
-    implementation: (str) => (str ? str.trim() : ''),
-  });
-
-  mem.public.registerFunction({
-    name: 'length',
-    args: ['text'],
-    returns: 'integer',
-    implementation: (str) => (str ? str.length : 0),
-  });
-
-  mem.public.registerFunction({
-    name: 'round',
-    args: ['numeric', 'integer'],
-    returns: 'numeric',
-    implementation: (num, dec) => Number(Number(num).toFixed(dec || 0)),
-  });
-
-  // Load and modify schema for in-memory compatibility
-  let schema = fs.readFileSync(path.join(__dirname, '../src/db/schema.sql'), 'utf-8');
-  schema = schema.replace(/CREATE EXTENSION IF NOT EXISTS "pgcrypto";/g, '');
-  schema = schema.replace(/CREATE EXTENSION IF NOT EXISTS "uuid-ossp";/g, '');
-  schema = schema.replace(/CONSTRAINT chk_student_id_format [^,;]+,/g, '');
-  schema = schema.replace(/CONSTRAINT chk_assignments_onedrive_link [^,;]+,/g, '');
-  
-  // Apply schema
-  mem.public.none(schema);
-
-  // Seed test users
+  // Seed standard test entities
   const adminHash = await hashPassword('Admin123!');
   const studentHash = await hashPassword('Password123!');
 
-  mem.public.none(`
-    INSERT INTO users (id, name, email, password_hash, role, student_id)
-    VALUES 
-      ('a0000000-0000-0000-0000-000000000001', 'Prof. Alan Turing', 'admin@university.edu', '${adminHash}', 'ADMIN', NULL),
-      ('a0000000-0000-0000-0000-000000000002', 'Alex Johnson', 'alex@student.edu', '${studentHash}', 'STUDENT', 'STU1001'),
-      ('a0000000-0000-0000-0000-000000000003', 'Brianna Smith', 'brianna@student.edu', '${studentHash}', 'STUDENT', 'STU1002'),
-      ('a0000000-0000-0000-0000-000000000004', 'Carlos Mendez', 'carlos@student.edu', '${studentHash}', 'STUDENT', 'STU1003'),
-      ('a0000000-0000-0000-0000-000000000005', 'Diana Prince', 'diana@student.edu', '${studentHash}', 'STUDENT', 'STU1004'),
-      ('a0000000-0000-0000-0000-000000000006', 'Ethan Hunt', 'ethan@student.edu', '${studentHash}', 'STUDENT', 'STU1005');
+  const admin = await User.create({
+    name: 'Prof. Alan Turing',
+    email: 'admin@university.edu',
+    password_hash: adminHash,
+    role: 'ADMIN',
+    student_id: null,
+  });
 
-    INSERT INTO groups (id, name, created_by)
-    VALUES 
-      ('b0000000-0000-0000-0000-000000000001', 'Cloud Architects Alpha', 'a0000000-0000-0000-0000-000000000002'),
-      ('b0000000-0000-0000-0000-000000000002', 'Distributed Systems Beta', 'a0000000-0000-0000-0000-000000000004');
+  const students = await User.create([
+    {
+      name: 'Alex Johnson',
+      email: 'alex@student.edu',
+      password_hash: studentHash,
+      role: 'STUDENT',
+      student_id: 'STU1001',
+    },
+    {
+      name: 'Brianna Smith',
+      email: 'brianna@student.edu',
+      password_hash: studentHash,
+      role: 'STUDENT',
+      student_id: 'STU1002',
+    },
+    {
+      name: 'Carlos Mendez',
+      email: 'carlos@student.edu',
+      password_hash: studentHash,
+      role: 'STUDENT',
+      student_id: 'STU1003',
+    },
+    {
+      name: 'Diana Prince',
+      email: 'diana@student.edu',
+      password_hash: studentHash,
+      role: 'STUDENT',
+      student_id: 'STU1004',
+    },
+    {
+      name: 'Ethan Hunt',
+      email: 'ethan@student.edu',
+      password_hash: studentHash,
+      role: 'STUDENT',
+      student_id: 'STU1005',
+    },
+  ]);
 
-    INSERT INTO group_members (id, group_id, user_id)
-    VALUES 
-      ('d0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002'),
-      ('d0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000003'),
-      ('d0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000004'),
-      ('d0000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000005');
+  const [alex, brianna, carlos, diana, ethan] = students;
 
-    INSERT INTO assignments (id, title, description, due_date, onedrive_link, target_type, created_by)
-    VALUES 
-      ('c0000000-0000-0000-0000-000000000001', 'Assignment 1: Microservices Architecture Blueprint', 'System architecture specification', NOW() + INTERVAL '7 days', 'https://onedrive.live.com/demo-assignment-1', 'ALL', 'a0000000-0000-0000-0000-000000000001'),
-      ('c0000000-0000-0000-0000-000000000002', 'Assignment 2: Distributed Consensus & Raft Protocol', 'Raft implementation reports', NOW() + INTERVAL '14 days', 'https://onedrive.live.com/demo-assignment-2', 'GROUPS', 'a0000000-0000-0000-0000-000000000001'),
-      ('c0000000-0000-0000-0000-000000000003', 'Assignment 3: PostgreSQL Query Optimization & Indexing', 'PostgreSQL indexing analysis', NOW() + INTERVAL '21 days', 'https://onedrive.live.com/demo-assignment-3', 'ALL', 'a0000000-0000-0000-0000-000000000001');
+  const groupAlpha = await Group.create({
+    name: 'Cloud Architects Alpha',
+    created_by: alex._id,
+  });
 
-    INSERT INTO assignment_targets (id, assignment_id, group_id)
-    VALUES 
-      ('e0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001');
+  const groupBeta = await Group.create({
+    name: 'Distributed Systems Beta',
+    created_by: carlos._id,
+  });
 
-    INSERT INTO submissions (id, assignment_id, student_id, group_id, status, confirmed_at)
-    VALUES 
-      ('f0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001', 'CONFIRMED', NOW());
-  `);
+  await GroupMember.create([
+    { group_id: groupAlpha._id, user_id: alex._id, joined_at: new Date(Date.now() - 5000) },
+    { group_id: groupAlpha._id, user_id: brianna._id, joined_at: new Date(Date.now() - 4000) },
+    { group_id: groupBeta._id, user_id: carlos._id, joined_at: new Date(Date.now() - 3000) },
+    { group_id: groupBeta._id, user_id: ethan._id, joined_at: new Date(Date.now() - 2000) },
+  ]);
 
-  const pgAdapter = mem.adapters.createPg();
-  const pool = new pgAdapter.Pool();
+  const assignment1 = await Assignment.create({
+    title: 'Assignment 1: Microservices Architecture Blueprint',
+    description: 'System architecture specification',
+    due_date: new Date(Date.now() + 7 * 86400000),
+    onedrive_link: 'https://onedrive.live.com/demo-assignment-1',
+    target_type: 'ALL',
+    created_by: admin._id,
+  });
 
-  return pool;
+  const assignment2 = await Assignment.create({
+    title: 'Assignment 2: Distributed Consensus & Raft Protocol',
+    description: 'Raft implementation reports',
+    due_date: new Date(Date.now() + 14 * 86400000),
+    onedrive_link: 'https://onedrive.live.com/demo-assignment-2',
+    target_type: 'GROUPS',
+    created_by: admin._id,
+  });
+
+  const assignment3 = await Assignment.create({
+    title: 'Assignment 3: MongoDB Aggregation & Performance Tuning',
+    description: 'MongoDB indexing and pipeline analysis',
+    due_date: new Date(Date.now() + 21 * 86400000),
+    onedrive_link: 'https://onedrive.live.com/demo-assignment-3',
+    target_type: 'ALL',
+    created_by: admin._id,
+  });
+
+  await AssignmentTarget.create({
+    assignment_id: assignment2._id,
+    group_id: groupAlpha._id,
+  });
+
+  await Submission.create({
+    assignment_id: assignment1._id,
+    student_id: alex._id,
+    group_id: groupAlpha._id,
+    status: 'CONFIRMED',
+    confirmed_at: new Date(),
+  });
+
+  return {
+    admin,
+    students: { alex, brianna, carlos, diana, ethan },
+    groups: { groupAlpha, groupBeta },
+    assignments: { assignment1, assignment2, assignment3 },
+  };
 };
 
-module.exports = { setupTestDb };
+const closeTestDb = async () => {
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect();
+  }
+  if (mongod) {
+    await mongod.stop();
+  }
+};
+
+module.exports = { setupTestDb, closeTestDb };

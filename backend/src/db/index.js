@@ -1,45 +1,58 @@
-const { Pool } = require('pg');
+const mongoose = require('mongoose');
 const config = require('../config');
 
-let activePool = null;
+let isConnected = false;
 
-const createPool = () => {
-  if (config.db.connectionString) {
-    return new Pool({
-      connectionString: config.db.connectionString,
-      ssl: config.db.ssl,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    });
+const connectDB = async (customUri = null) => {
+  if (isConnected && mongoose.connection.readyState === 1) {
+    return mongoose.connection;
   }
 
-  return new Pool({
-    host: config.db.host,
-    port: config.db.port,
-    database: config.db.database,
-    user: config.db.user,
-    password: config.db.password,
-    ssl: config.db.ssl,
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
-  });
+  const uri = customUri || config.db.uri;
+
+  try {
+    const conn = await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 5000,
+    });
+
+    isConnected = true;
+    console.log(` [MongoDB] Connected to database: ${conn.connection.name} @ ${conn.connection.host}`);
+    return conn.connection;
+  } catch (error) {
+    console.error(' [MongoDB] Connection error:', error.message);
+    isConnected = false;
+    throw error;
+  }
 };
 
-activePool = createPool();
+const disconnectDB = async () => {
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect();
+    isConnected = false;
+    console.log(' [MongoDB] Disconnected from database.');
+  }
+};
 
-activePool.on('error', (err) => {
-  console.error('Unexpected error on idle PostgreSQL client:', err.message);
+const isDbConnected = () => {
+  return mongoose.connection.readyState === 1;
+};
+
+// Monitor connection events
+mongoose.connection.on('disconnected', () => {
+  isConnected = false;
+  console.warn('⚠️ [MongoDB] Connection lost.');
+});
+
+mongoose.connection.on('reconnected', () => {
+  isConnected = true;
+  console.log(' [MongoDB] Connection restored.');
 });
 
 module.exports = {
-  query: (text, params) => activePool.query(text, params),
-  getClient: () => activePool.connect(),
-  get pool() {
-    return activePool;
-  },
-  setPool: (newPool) => {
-    activePool = newPool;
+  connectDB,
+  disconnectDB,
+  isDbConnected,
+  get connection() {
+    return mongoose.connection;
   },
 };
