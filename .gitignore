@@ -3,8 +3,10 @@ node_modules/
 .pnp
 .pnp.js
 
-# Environment files
+# Environment variables
 .env
+.env.*
+!.env.example
 .env.local
 .env.development.local
 .env.test.local
@@ -36,6 +38,10 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+*.bak
+*.tmp
+*.old
 
 # Database local storage
-postgres_data/
+mongo_data/
+mongodb_data/
